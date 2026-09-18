@@ -114,3 +114,4 @@ Audit events still use the in-memory sink; the `AuditEvent` table exists for the
 ## Next
 
 See `PLAN.md` §2 for Phases 3–9. Open items: `ASSUMPTIONS.md` A-3, A-18 (🔴) and the DBA questions.
+'# jadi-dashboard' 
