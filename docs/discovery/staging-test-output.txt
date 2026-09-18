@@ -1,0 +1,14 @@
+﻿
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90mC:/jadiDashboard[39m
+
+ [32mΓ£ô[39m tests/staging/mssql-provider.test.ts[2m > [22mmssql provider against staging ousadb[2m > [22mresolves exactly one current and one previous term from tblOUSA[33m 384[2mms[22m[39m
+ [32mΓ£ô[39m tests/staging/mssql-provider.test.ts[2m > [22mmssql provider against staging ousadb[2m > [22mhero figures reconcile: cleared + notCleared - clearedNotEnrolled = enrolled[33m 403[2mms[22m[39m
+ [32mΓ£ô[39m tests/staging/mssql-provider.test.ts[2m > [22mmssql provider against staging ousadb[2m > [22mDNC/DNR match the supplied query semantics and the DNR guard holds[33m 2247[2mms[22m[39m
+ [32mΓ£ô[39m tests/staging/mssql-provider.test.ts[2m > [22mmssql provider against staging ousadb[2m > [22mreceivable and charges/credits return typed numbers[32m 140[2mms[22m[39m
+ [32mΓ£ô[39m tests/staging/mssql-provider.test.ts[2m > [22mmssql provider against staging ousadb[2m > [22mdrill-down rows carry only the approved fields[33m 344[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 23:54:13
+[2m   Duration [22m 4.21s[2m (tests 88%, import 9%, transform 2%)[22m
+

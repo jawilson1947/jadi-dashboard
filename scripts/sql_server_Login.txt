@@ -1,0 +1,7 @@
+[Environment]::SetEnvironmentVariable("JADI_STAGING_SERVER",   "SJ-VMS",          "User")
+[Environment]::SetEnvironmentVariable("JADI_STAGING_DATABASE", "ousadb",          "User")
+[Environment]::SetEnvironmentVariable("JADI_STAGING_USER",     "<sa>",     "User")
+[Environment]::SetEnvironmentVariable("JADI_STAGING_PASSWORD", "<DanaDenyse32>",      "User")
+*******
+[Environment]::SetEnvironmentVariable("JADI_STAGING_USER",     "DataOps",              "User")
+[Environment]::SetEnvironmentVariable("JADI_STAGING_PASSWORD", "DanaDenyse32", "User")

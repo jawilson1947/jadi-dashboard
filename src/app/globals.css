@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/*
+ * Institution theme (Spec §5: branding is configurable, never hard-coded in components).
+ * Every component references these tokens only. Swap the values (or load them from the
+ * Setting table in Phase 2) to rebrand. Dark mode is a selected set, not an auto-flip.
+ */
+:root {
+  color-scheme: light;
+  --surface-0: #f5f5f3;      /* page */
+  --surface-1: #fcfcfb;      /* cards, chart surface */
+  --surface-2: #eeeeeb;      /* table header, tracks */
+  --border: #d9d8d2;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7a7974;
+
+  --brand: #2a78d6;          /* accent / primary action / series-1 */
+  --brand-ink: #ffffff;
+  --brand-track: #d6e4f7;    /* lighter step of the same ramp for meter tracks */
+
+  --status-good: #008300;
+  --status-warning: #c98500;
+  --status-serious: #d95926;
+  --status-critical: #e34948;
+  --status-neutral: #52514e;
+
+  --focus: #2a78d6;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --border: #35342f;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --brand: #3987e5;
+    --brand-track: #23395a;
+    --status-good: #35a835;
+    --status-warning: #e0a12f;
+    --status-serious: #e8734a;
+    --status-critical: #e66767;
+    --status-neutral: #c3c2b7;
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #242422;
+  --border: #35342f;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e86;
+  --brand: #3987e5;
+  --brand-track: #23395a;
+  --status-good: #35a835;
+  --status-warning: #e0a12f;
+  --status-serious: #e8734a;
+  --status-critical: #e66767;
+  --status-neutral: #c3c2b7;
+  --focus: #3987e5;
+}
+
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-muted);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-track: var(--brand-track);
+  --color-good: var(--status-good);
+  --color-warning: var(--status-warning);
+  --color-serious: var(--status-serious);
+  --color-critical: var(--status-critical);
+  --radius-card: var(--radius);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+/* Accessible focus indicator on every interactive element (Spec §20). */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ── Print (Spec §5: print option on every report view) ─────────────────────── */
+.print-only, .print-scope-header, .print-scope-footer, .print-all-rows-table { display: none; }
+
+@media print {
+  @page { margin: 12mm; }
+  :root { --surface-0: #fff; --surface-1: #fff; --surface-2: #f3f3f3; --border: #999; --text-primary: #000; --text-secondary: #222; --text-muted: #444; }
+  html, body { background: #fff !important; color: #000 !important; }
+  /* Application chrome and controls never print. */
+  .no-print, aside[aria-label="Primary"], .app-header, nav, button, [role="search"], a[href^="/sign-in"] { display: none !important; }
+  main { padding: 0 !important; }
+  a { color: inherit !important; text-decoration: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #999 !important; break-inside: avoid; page-break-inside: avoid; }
+  .print-stack { display: block !important; }
+  .print-stack > * { margin-bottom: 0.75rem; }
+  table { border-collapse: collapse; width: 100%; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  th, td { border-bottom: 1px solid #bbb; }
+  .overflow-x-auto, .overflow-hidden { overflow: visible !important; }
+  .print-only { display: block; }
+  .print-footer, body.print-scoped [data-printing] .print-scope-footer { position: fixed; bottom: 0; left: 0; right: 0; height: 14px; background: #fff; font-size: 8px; color: #444; border-top: 1px solid #999; padding-top: 2px; text-align: center; }
+  /* Long tables reserve the footer strip on every page via a repeating tfoot spacer. */
+  .print-all-rows-table tfoot td { height: 16px; border: 0; }
+  /* Print only one card: remove every sibling that does not contain the target (no blank trailing pages). */
+  body.print-scoped main > *:not(:has([data-printing])) { display: none !important; }
+  body.print-scoped .print-stack > *:not([data-printing]) { display: none !important; }
+  body.print-scoped [data-printing] { border: none !important; padding: 0 !important; }
+  body.print-scoped [data-printing] .print-scope-header { display: block; }
+  body.print-scoped [data-printing] .print-scope-footer { display: block; }
+  body.print-scoped .print-only { display: none !important; }
+  /* Drill-down "all rows": hide the paginated on-screen table, show the full one. */
+  body.print-all-rows .paged-table { display: none !important; }
+  body.print-all-rows .print-all-rows-table { display: block; }
+}

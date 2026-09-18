@@ -1,0 +1,43 @@
+/**
+ * Applies db/migrations/*.sql to ousadb schema [dash] in filename order, once each (A-21).
+ * Usage: DASH_CONNECTION_STRING="Server=...;Database=ousadb;User Id=jadi_dash;Password=...;Encrypt=true;TrustServerCertificate=true" npm run db:migrate
+ * The connection string is read from the environment only. The login needs the grants in db/grants/jadi_dash.sql.
+ */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import sql from "mssql";
+
+async function main() {
+  const cs = process.env.DASH_CONNECTION_STRING ?? process.env.DATABASE_URL;
+  if (!cs) throw new Error("DASH_CONNECTION_STRING is not set");
+  const pool = await sql.connect(cs);
+  try {
+    await pool.request().query(`IF SCHEMA_ID('dash') IS NULL EXEC('CREATE SCHEMA dash AUTHORIZATION dbo');`);
+    await pool.request().query(`IF OBJECT_ID('dash.SchemaMigration') IS NULL CREATE TABLE dash.SchemaMigration (name nvarchar(200) NOT NULL PRIMARY KEY, appliedAt datetime2 NOT NULL DEFAULT SYSUTCDATETIME());`);
+    const applied = new Set((await pool.request().query<{ name: string }>("SELECT name FROM dash.SchemaMigration")).recordset.map((r) => r.name));
+    const dir = join(process.cwd(), "db", "migrations");
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+      if (applied.has(file)) continue;
+      const body = readFileSync(join(dir, file), "utf8");
+      const tx = new sql.Transaction(pool);
+      await tx.begin();
+      try {
+        for (const batch of body.split(/^\s*GO\s*$/im)) if (batch.trim()) await new sql.Request(tx).batch(batch);
+        await new sql.Request(tx).input("name", sql.NVarChar(200), file).query("INSERT INTO dash.SchemaMigration(name) VALUES (@name)");
+        await tx.commit();
+        console.log(`applied ${file}`);
+      } catch (e) {
+        await tx.rollback();
+        throw e;
+      }
+    }
+    console.log("migrations up to date");
+  } finally {
+    await pool.close();
+  }
+}
+
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+});
