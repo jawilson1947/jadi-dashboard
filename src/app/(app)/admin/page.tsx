@@ -9,7 +9,7 @@ const SECTIONS = [
   { href: "/admin/jobs", title: "Refresh schedules & job status", desc: "Snapshot jobs, last/next run, manual refresh.", permission: "schedule.manage", phase: null },
   { href: "/admin/metadata", title: "Semester / JADI metadata", desc: "tblOUSA read-through: current and previous term, census, nightly cleared totals, drop dates, worksheet folders.", permission: "metadata.manage", phase: null },
   { href: "/admin/users", title: "Users and roles", desc: "Dashboard accounts, roles, per-user grants, one-time invite and reset links, lockouts.", permission: "user.manage", phase: null },
-  { href: "#", title: "Operators", desc: "ClearedBy code → display name, effective dates.", permission: "operator.manage", phase: 3 },
+  { href: "/admin/operators", title: "Operators", desc: "ClearedBy code → display name, effective dates; unmapped codes seen in the current sprint.", permission: "operator.manage", phase: null },
   { href: "#", title: "Classification mappings", desc: "cCode → display name, sort order; Incoming Transfer rule.", permission: "metadata.manage", phase: 3 },
   { href: "#", title: "Data connections", desc: "Source connection descriptors and connectivity test (secrets never shown).", permission: "connection.manage", phase: 6 },
   { href: "#", title: "Audit log", desc: "Sign-ins, student-profile access, exports, admin changes.", permission: "audit.view", phase: 3 },

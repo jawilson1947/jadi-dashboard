@@ -4,6 +4,7 @@
  *
  *   RESET_USERNAME=jwilson APP_STORE=mssql DASH_CONNECTION_STRING="..." npm run reset:credentials
  */
+import "./load-env";
 import { getIdentityStore } from "../src/server/identity";
 import { resetCredentials } from "../src/server/identity/service";
 import { closePools } from "../src/server/db/mssql";

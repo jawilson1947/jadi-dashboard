@@ -1,15 +1,23 @@
 /**
  * Applies db/migrations/*.sql to ousadb schema [dash] in filename order, once each (A-21).
- * Usage: DASH_CONNECTION_STRING="Server=...;Database=ousadb;User Id=jadi_dash;Password=...;Encrypt=true;TrustServerCertificate=true" npm run db:migrate
- * The connection string is read from the environment only. The login needs the grants in db/grants/jadi_dash.sql.
+ * Usage: npm run db:migrate
+ * The connection string comes from the environment or from .env.local / .env (scripts/load-env.ts):
+ * DASH_CONNECTION_STRING, or the legacy DATABASE_URL / JADI_DASH_CONNECTION_STRING names. It is never
+ * printed. The login needs the grants in db/grants/jadi_dash.sql.
  */
+import "./load-env";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import sql from "mssql";
 
 async function main() {
-  const cs = process.env.DASH_CONNECTION_STRING ?? process.env.DATABASE_URL;
-  if (!cs) throw new Error("DASH_CONNECTION_STRING is not set");
+  const cs = process.env.DASH_CONNECTION_STRING ?? process.env.DATABASE_URL ?? process.env.JADI_DASH_CONNECTION_STRING;
+  if (!cs) {
+    throw new Error(
+      "DASH_CONNECTION_STRING is not set. Add it to .env.local (or set DATABASE_URL / JADI_DASH_CONNECTION_STRING, " +
+        "or pass it for one run), e.g. DASH_CONNECTION_STRING=\"Server=...;Database=ousadb;User Id=jadi_dash;Password=...;Encrypt=true;TrustServerCertificate=true\"",
+    );
+  }
   const pool = await sql.connect(cs);
   try {
     await pool.request().query(`IF SCHEMA_ID('dash') IS NULL EXEC('CREATE SCHEMA dash AUTHORIZATION dbo');`);

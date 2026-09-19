@@ -4,6 +4,7 @@
  *   npm run snapshot:once
  * Honors DATA_PROVIDER / APP_STORE / OUSADB_CONNECTION_STRING from the environment.
  */
+import "./load-env";
 import { getConfig } from "../src/server/db/config";
 import { closePools } from "../src/server/db/mssql";
 import { JOB_DEFINITIONS } from "../src/server/jobs/definitions";

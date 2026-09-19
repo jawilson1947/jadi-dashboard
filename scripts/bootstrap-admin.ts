@@ -7,6 +7,7 @@
  *
  * With APP_STORE=memory the user is written to IDENTITY_STORE_FILE. Nothing is printed except the link.
  */
+import "./load-env";
 import { bootstrapAdministrator } from "../src/server/identity/service";
 import { closePools } from "../src/server/db/mssql";
 

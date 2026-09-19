@@ -2,7 +2,14 @@ import { getSourcePool, sql } from "../../db/mssql";
 import type {
   ChargesCredits,
   ClassificationCounts,
+  ClearanceByDateRow,
+  ClearanceByOperatorRow,
   DataProvider,
+  DateRange,
+  DnrDncRow,
+  GlobalBalances,
+  ReceivableByTermRow,
+  SprintStudentFilter,
   DnrDncSummary,
   DrillDownPopulation,
   EnrollmentClearance,
@@ -103,13 +110,65 @@ export class MssqlDataProvider implements DataProvider {
     };
   }
 
-  async getClassificationCounts(): Promise<ClassificationCounts> {
-    const r = await (await this.pool()).request().query<{ kind: "enrolled" | "cleared"; code: string; n: number }>(Q.classificationCounts);
+  async getClassificationCounts(range?: DateRange): Promise<ClassificationCounts> {
+    const pool = await this.pool();
+    const r = range
+      ? await (await this.windowed(range)).query<ClassRow>(`${Q.sprintPrelude(true)}${Q.classificationCountsInRange}${Q.sprintEpilogue(true)}`)
+      : await pool.request().query<ClassRow>(Q.classificationCounts);
     const enrolled = new Map<string, number>();
     const cleared = new Map<string, number>();
     for (const row of lastSet(r)) (row.kind === "enrolled" ? enrolled : cleared).set(row.code, Number(row.n));
     return { enrolled, cleared };
   }
+
+  /** Spec §7.1 — one row per day inside the window that had a (deduped) clearance action. */
+  async getClearanceByDate(range: DateRange): Promise<ClearanceByDateRow[]> {
+    const r = await (await this.windowed(range)).query<{ d: Date | string; n: number }>(`${Q.sprintPrelude()}${Q.clearanceByDate}${Q.sprintEpilogue()}`);
+    return lastSet(r).map((row) => ({ date: typeof row.d === "string" ? row.d.slice(0, 10) : row.d.toISOString().slice(0, 10), cleared: Number(row.n) }));
+  }
+
+  /** Spec §7.2 — per ClearedBy code, with first/last action inside the window. */
+  async getClearanceByOperator(range: DateRange): Promise<ClearanceByOperatorRow[]> {
+    const r = await (await this.windowed(range)).query<{ code: string; n: number; firstAt: Date | null; lastAt: Date | null }>(
+      `${Q.sprintPrelude()}${Q.clearanceByOperator}${Q.sprintEpilogue()}`,
+    );
+    return lastSet(r).map((row) => ({
+      operatorCode: row.code ?? "",
+      cleared: Number(row.n),
+      firstAt: row.firstAt ? new Date(row.firstAt) : null,
+      lastAt: row.lastAt ? new Date(row.lastAt) : null,
+    }));
+  }
+
+  async getSprintStudents(filter: SprintStudentFilter, page: PageRequest): Promise<Page<StudentRow>> {
+    const clauses: string[] = [];
+    if (filter.date) clauses.push(Q.sprintWhere.day);
+    if (filter.operatorCode !== undefined) clauses.push(Q.sprintWhere.operator);
+    if (filter.classificationCode) clauses.push(Q.sprintWhere.classification);
+    const where = clauses.length ? clauses.join(" AND ") : Q.sprintWhere.all;
+    const sortField = SPRINT_SORT_COLUMNS[page.sort?.field ?? "lastName"] ?? "S.lastname";
+    const dir = page.sort?.direction === "desc" ? "DESC" : "ASC";
+
+    const bind = async () => {
+      const req = await this.windowed(filter.range);
+      if (filter.date) req.input("day", sql.Date, utcDate(filter.date));
+      if (filter.operatorCode !== undefined) req.input("operator", sql.VarChar(100), filter.operatorCode);
+      if (filter.classificationCode) req.input("classification", sql.VarChar(10), filter.classificationCode);
+      return req;
+    };
+    const [rows, count] = await Promise.all([
+      bind().then((req) =>
+        req
+          .input("offset", sql.Int, (page.page - 1) * page.pageSize)
+          .input("pageSize", sql.Int, page.pageSize)
+          .query<RawStudent>(`${Q.sprintPrelude(true)}${Q.sprintStudentPage(where, sortField, dir)}${Q.sprintEpilogue(true)}`),
+      ),
+      bind().then((req) => req.query<{ n: number }>(`${Q.sprintPrelude(true)}${Q.sprintStudentCount(where)}${Q.sprintEpilogue(true)}`)),
+    ]);
+    return { rows: lastSet(rows).map(mapStudent), page: page.page, pageSize: page.pageSize, totalRows: last(count).n };
+  }
+
+
 
   async getStudentsForPopulation(population: DrillDownPopulation, page: PageRequest): Promise<Page<StudentRow>> {
     const pool = await this.pool();
@@ -127,6 +186,33 @@ export class MssqlDataProvider implements DataProvider {
       pageSize: page.pageSize,
       totalRows: last(count).n,
     };
+  }
+
+  /** A request with the sprint window bound; `@end` is an inclusive calendar date (the SQL adds the day). */
+  private async windowed(range: DateRange): Promise<sql.Request> {
+    return (await this.pool()).request().input("start", sql.Date, utcDate(range.start)).input("end", sql.Date, utcDate(range.end));
+  }
+
+  async getDnrDncPopulation(limit = 5000): Promise<DnrDncRow[]> {
+    const r = await (await this.pool()).request().input("limit", sql.Int, limit).query<RawStudent & { category: "DNR" | "DNC" }>(Q.dnrDncPopulation);
+    return lastSet(r).map((row) => ({ ...mapStudent(row), category: row.category }));
+  }
+
+  async getGlobalBalances(): Promise<GlobalBalances> {
+    const r = await (await this.pool()).request().query<{ positiveTotal: number; positiveCount: number; negativeTotal: number; negativeCount: number; zeroCount: number }>(Q.globalBalances);
+    const row = r.recordset[0];
+    return {
+      positiveTotal: money(row.positiveTotal),
+      positiveCount: Number(row.positiveCount),
+      negativeTotal: money(row.negativeTotal),
+      negativeCount: Number(row.negativeCount),
+      zeroCount: Number(row.zeroCount),
+    };
+  }
+
+  async getReceivablesByTerm(): Promise<ReceivableByTermRow[]> {
+    const r = await (await this.pool()).request().query<{ termKey: string; students: number; positiveBalance: number }>(Q.receivablesByTerm);
+    return r.recordset.map((row) => ({ termKey: (row.termKey ?? "").trim(), students: Number(row.students), positiveBalance: money(row.positiveBalance) }));
   }
 
   /** Convenience for tests/health: confirms the current/previous term rows resolve. */
@@ -153,6 +239,15 @@ const SORT_COLUMNS: Partial<Record<keyof StudentRow, string>> = {
   idnumber: "S.idnumber",
   lastCleared: "S.LastCleared",
 };
+
+/** Sprint pages join #first as `f`, so the clearance timestamp sorts from there. */
+const SPRINT_SORT_COLUMNS: Partial<Record<keyof StudentRow, string>> = { ...SORT_COLUMNS, clearedAt: "f.DateCleared", clearedBy: "f.ClearedBy" };
+
+interface ClassRow {
+  kind: "enrolled" | "cleared";
+  code: string;
+  n: number;
+}
 
 interface RawTerm {
   id: number; SemesterName: string; JADI_TradName: string; JADI_LeapName: string; JADI_YR_CDE: string;
@@ -183,6 +278,15 @@ function mapStudent(r: RawStudent): StudentRow {
     clearedAt: r.DateCleared ? new Date(r.DateCleared) : null,
     enrolledCurrentTerm: Boolean(r.enrolled),
   };
+}
+
+/**
+ * Bind a calendar date as an explicit UTC-midnight Date. tedious writes `date` parameters from the
+ * value's UTC components, so this sends exactly the day the administrator entered — never a string
+ * whose interpretation would depend on the session's language or DATEFORMAT.
+ */
+function utcDate(iso: string): Date {
+  return new Date(`${iso}T00:00:00Z`);
 }
 
 /** SQL money/numeric arrive as JS numbers from tedious; normalise nulls and rounding. */

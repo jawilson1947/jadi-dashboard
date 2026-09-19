@@ -62,6 +62,9 @@ const FAMILY_JOB: Partial<Record<MetricFamily, JobKey>> = {
   currentReceivable: "dashboard.currentReceivable",
   chargesCredits: "dashboard.chargesCredits",
   dnrDnc: "dashboard.dnrDnc",
+  historyEnrollment: "history.enrollmentClearance",
+  historyBalances: "history.globalBalances",
+  historyReceivables: "history.receivablesBySemester",
   terms: "metadata.terms",
 };
 

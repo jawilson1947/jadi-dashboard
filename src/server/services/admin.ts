@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { Cron } from "croner";
 import { getConfig } from "../db/config";
 import { getAppStore } from "../store";
-import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord } from "../store/types";
+import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, OperatorProfileRecord, SprintWindowRecord } from "../store/types";
+import { isIsoDate } from "@/lib/dates";
 import { ensureJobsSeeded, runJob } from "../jobs/runner";
 import type { Principal } from "../authz/permissions";
 import { audit } from "../audit/audit";
@@ -41,4 +43,76 @@ export async function manualRun(key: JobKey, actor: Principal, correlationId?: s
   const run = await runJob(key, { triggeredBy: `manual:${actor.userId}`, ignoreMinInterval: true });
   await audit(actor, "job.manual_run", { correlationId, targetType: "job", targetId: key, metadata: { status: run.status, durationMs: run.durationMs, rows: run.rowsProcessed } });
   return run;
+}
+
+/**
+ * Set a semester's clearance sprint window (ASSUMPTIONS A-10). Both dates are required and are
+ * calendar dates in the institution timezone; there is no computed default, and the app never
+ * writes these back to tblOUSA (A-20). Changing them invalidates the current sprint snapshot,
+ * which the sprint page detects and re-captures on its next load.
+ */
+export async function setSprintWindow(
+  actor: Principal,
+  input: { termKey: string; start: string; end: string },
+  correlationId?: string,
+  store: AppStore = getAppStore(),
+): Promise<SprintWindowRecord> {
+  if (!isIsoDate(input.start) || !isIsoDate(input.end)) throw new Error("Sprint dates must be calendar dates (YYYY-MM-DD).");
+  if (input.end < input.start) throw new Error("The sprint end date cannot be before the start date.");
+  const before = await store.getSprintWindow(input.termKey);
+  await store.setSprintWindow(input.termKey, input.start, input.end, actor.userId);
+  await audit(actor, "admin.change", {
+    correlationId,
+    targetType: "sprintWindow",
+    targetId: input.termKey,
+    metadata: { start: input.start, end: input.end, previousStart: before?.start ?? null, previousEnd: before?.end ?? null },
+  });
+  return (await store.getSprintWindow(input.termKey))!;
+}
+
+export interface OperatorInput {
+  id?: string;
+  sourceCode: string;
+  displayName: string;
+  email?: string | null;
+  department?: string | null;
+  isActive?: boolean;
+  isSystem?: boolean;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}
+
+/** Create or update an operator profile (Spec §7.2). Names are entered by administrators, never inferred. */
+export async function upsertOperator(actor: Principal, input: OperatorInput, correlationId?: string, store: AppStore = getAppStore()): Promise<OperatorProfileRecord> {
+  for (const d of [input.effectiveFrom, input.effectiveTo]) if (d && !isIsoDate(d)) throw new Error("Effective dates must be calendar dates (YYYY-MM-DD).");
+  if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new Error("The effective-to date cannot be before the effective-from date.");
+  const record: OperatorProfileRecord = {
+    id: input.id ?? randomUUID(),
+    sourceCode: input.sourceCode.trim(),
+    displayName: input.displayName.trim(),
+    email: input.email?.trim() || null,
+    department: input.department?.trim() || null,
+    isActive: input.isActive ?? true,
+    isSystem: input.isSystem ?? false,
+    effectiveFrom: input.effectiveFrom || null,
+    effectiveTo: input.effectiveTo || null,
+    updatedAt: new Date(),
+    updatedBy: actor.userId,
+  };
+  await store.upsertOperatorProfile(record);
+  await audit(actor, "admin.change", {
+    correlationId,
+    targetType: "operatorProfile",
+    targetId: record.sourceCode,
+    metadata: { displayName: record.displayName, isActive: record.isActive, effectiveFrom: record.effectiveFrom, effectiveTo: record.effectiveTo },
+  });
+  return record;
+}
+
+export async function listOperators(store: AppStore = getAppStore()): Promise<OperatorProfileRecord[]> {
+  return store.listOperatorProfiles();
+}
+
+export async function listSprintWindows(store: AppStore = getAppStore()): Promise<SprintWindowRecord[]> {
+  return store.listSprintWindows();
 }

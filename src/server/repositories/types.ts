@@ -102,6 +102,19 @@ export interface DnrDncSummary {
 
 export type DrillDownPopulation = "enrolled" | "cleared" | "notCleared" | "receivable" | "dnc" | "dnr";
 
+/** DNR/DNC category (Spec §8). A student belongs to exactly one: the rules are mutually exclusive (A-1). */
+export type DnrDncCategory = "DNR" | "DNC";
+
+/**
+ * One row of the DNR/DNC population (Spec §8). It is the same StudentRow the drill-downs use, plus the
+ * category the A-1 rule assigned. The population is bounded — A-1 includes `AccountBalance > 0`, so it is
+ * in the low hundreds — which is why the provider returns it whole and the service filters, sorts,
+ * paginates and totals it in one place: the table, the footer total and the export cannot disagree.
+ */
+export interface DnrDncRow extends StudentRow {
+  category: DnrDncCategory;
+}
+
 export interface PageRequest {
   page: number;
   pageSize: number;
@@ -122,11 +135,65 @@ export interface SourceInfo {
   snapshotId: string | null;
 }
 
+/**
+ * Inclusive calendar-date window in the institution timezone (ASSUMPTIONS A-10).
+ * Providers translate it to their own boundary: SQL `>= start AND < end + 1 day`, mock `toIsoDate()`.
+ */
+export interface DateRange {
+  start: string; // YYYY-MM-DD
+  end: string; // YYYY-MM-DD
+}
+
+/** One day of the sprint (Spec §7.1). Days with no clearance actions are filled in by the service. */
+export interface ClearanceByDateRow {
+  date: string; // YYYY-MM-DD
+  cleared: number;
+}
+
+/** One ClearedBy code in the window (Spec §7.2). Names are resolved from OperatorProfile by the service. */
+export interface ClearanceByOperatorRow {
+  operatorCode: string;
+  cleared: number;
+  firstAt: Date | null;
+  lastAt: Date | null;
+}
+
+/** Drill-down selector for sprint tables: a day, an operator, or a classification bucket within the window. */
+export interface SprintStudentFilter {
+  range: DateRange;
+  date?: string;
+  operatorCode?: string;
+  /** Bucket code after A-19 / FF→FR / blank→XX mapping, as produced by breakdownCode(). */
+  classificationCode?: string;
+}
+
 /** Raw per-code counts for the Clearance Breakdown (Spec §7.3); the service builds rows with buildBreakdown(). */
 export interface ClassificationCounts {
   /** bucket code (after Incoming Transfer / FF→FR / blank→XX mapping) → count */
   enrolled: Map<string, number>;
   cleared: Map<string, number>;
+}
+
+/**
+ * Spec §9.2. Totals over every row of tblStudent — the authoritative balance column (A-18).
+ * Field names describe the SQL predicate; on screen and in exports these are **debit balances**
+ * (positive) and **credit balances** (negative) — the terminology set in A-5.
+ */
+export interface GlobalBalances {
+  positiveTotal: number;
+  positiveCount: number;
+  /** Absolute value of the negative total. Secondary figure only, never netted (A-5). */
+  negativeTotal: number;
+  negativeCount: number;
+  zeroCount: number;
+}
+
+/** Spec §9.3: debit balances grouped by the term code in tblStudent.LastCleared (A-22, A-5). */
+export interface ReceivableByTermRow {
+  /** Raw term code, resolved to a semester by the service. */
+  termKey: string;
+  students: number;
+  positiveBalance: number;
 }
 
 export interface DataProvider {
@@ -138,8 +205,29 @@ export interface DataProvider {
   getCurrentReceivable(terms: TermKey[]): Promise<ReceivableSummary>;
   getChargesCredits(): Promise<ChargesCredits>;
   getDnrDncSummary(): Promise<DnrDncSummary>;
-  getClassificationCounts(): Promise<ClassificationCounts>;
+  /**
+   * Enrolled/cleared counts per classification bucket. Without a range this is the whole term
+   * (the dashboard card); with one, only clearance actions inside the window count as cleared
+   * (the sprint's By Classification tab) — enrolled is always current enrollment.
+   */
+  getClassificationCounts(range?: DateRange): Promise<ClassificationCounts>;
+  /** Clearance actions per calendar date inside the window (Spec §7.1). Sparse: only days with actions. */
+  getClearanceByDate(range: DateRange): Promise<ClearanceByDateRow[]>;
+  /** Clearance actions per ClearedBy code inside the window (Spec §7.2). */
+  getClearanceByOperator(range: DateRange): Promise<ClearanceByOperatorRow[]>;
   getStudentsForPopulation(population: DrillDownPopulation, page: PageRequest): Promise<Page<StudentRow>>;
+  /**
+   * The whole positive-balance DNR/DNC population (Spec §8), both categories, unsorted.
+   * `limit` is a safety cap: if the source ever returns more, the caller is told rather than
+   * silently shown a truncated total.
+   */
+  getDnrDncPopulation(limit?: number): Promise<DnrDncRow[]>;
+  /** Spec §9.2 — global positive and negative totals over tblStudent (A-18). */
+  getGlobalBalances(): Promise<GlobalBalances>;
+  /** Spec §9.3 — positive balances grouped by LastCleared, one row per term code including the sentinel. */
+  getReceivablesByTerm(): Promise<ReceivableByTermRow[]>;
+  /** Students behind a sprint cell — a day, an operator, or a classification (Spec §7.1–7.3 drill-downs). */
+  getSprintStudents(filter: SprintStudentFilter, page: PageRequest): Promise<Page<StudentRow>>;
 }
 
 /** Thrown by a provider when the underlying source cannot be reached or is misconfigured. */

@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, SnapshotRecord } from "./types";
+import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, SnapshotRecord, SprintWindowRecord } from "./types";
 
 interface State {
   jobs: JobDefinitionRecord[];
   runs: JobRunRecord[];
   snapshots: SnapshotRecord[];
+  sprintWindows: SprintWindowRecord[];
+  operators: OperatorProfileRecord[];
   settings: Record<string, { value: unknown; updatedAt: string; updatedBy: string | null }>;
 }
 
@@ -18,7 +20,7 @@ const MAX_SNAPSHOTS = 5000;
  * Not for production: a single-process store cannot coordinate multiple workers.
  */
 export class MemoryAppStore implements AppStore {
-  private state: State = { jobs: [], runs: [], snapshots: [], settings: {} };
+  private state: State = { jobs: [], runs: [], snapshots: [], sprintWindows: [], operators: [], settings: {} };
   private lastLoadedMtime = -1;
 
   constructor(private readonly file?: string) {
@@ -114,8 +116,11 @@ export class MemoryAppStore implements AppStore {
   }
   async latestSnapshot<T>(family: MetricFamily) {
     this.load();
-    const rows = this.state.snapshots.filter((s) => s.metricFamily === family).sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime());
-    return (rows[0] as SnapshotRecord<T> | undefined) ?? null;
+    // Ties break towards the most recently written row: with an injected clock (tests, a paused
+    // scheduler) two captures can share a timestamp, and the newer one is the right answer.
+    let latest: SnapshotRecord | null = null;
+    for (const s of this.state.snapshots) if (s.metricFamily === family && (latest === null || s.capturedAt.getTime() >= latest.capturedAt.getTime())) latest = s;
+    return (latest as SnapshotRecord<T> | null) ?? null;
   }
   async previousSnapshot<T>(family: MetricFamily, before: Date) {
     this.load();
@@ -123,6 +128,47 @@ export class MemoryAppStore implements AppStore {
       .filter((s) => s.metricFamily === family && s.capturedAt.getTime() < before.getTime())
       .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime());
     return (rows[0] as SnapshotRecord<T> | undefined) ?? null;
+  }
+
+  /** Newest snapshot per termKey (the sprint overlay's archive). */
+  async latestSnapshotsByTerm<T>(family: MetricFamily, limit = 12) {
+    this.load();
+    const byTerm = new Map<string, SnapshotRecord>();
+    for (const s of this.state.snapshots.filter((s) => s.metricFamily === family)) {
+      const key = s.termKey ?? "";
+      const seen = byTerm.get(key);
+      if (!seen || s.capturedAt.getTime() >= seen.capturedAt.getTime()) byTerm.set(key, s);
+    }
+    return [...byTerm.values()].sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime()).slice(0, limit) as SnapshotRecord<T>[];
+  }
+
+  async listSprintWindows() {
+    this.load();
+    return [...this.state.sprintWindows].sort((a, b) => b.start.localeCompare(a.start));
+  }
+  async getSprintWindow(termKey: string) {
+    this.load();
+    return this.state.sprintWindows.find((w) => w.termKey === termKey) ?? null;
+  }
+  async setSprintWindow(termKey: string, start: string, end: string, updatedBy: string | null) {
+    this.load();
+    const row: SprintWindowRecord = { termKey, start, end, updatedAt: new Date(), updatedBy };
+    const i = this.state.sprintWindows.findIndex((w) => w.termKey === termKey);
+    if (i >= 0) this.state.sprintWindows[i] = row;
+    else this.state.sprintWindows.push(row);
+    this.persist();
+  }
+
+  async listOperatorProfiles() {
+    this.load();
+    return [...this.state.operators].sort((a, b) => a.sourceCode.localeCompare(b.sourceCode) || (a.effectiveFrom ?? "").localeCompare(b.effectiveFrom ?? ""));
+  }
+  async upsertOperatorProfile(record: OperatorProfileRecord) {
+    this.load();
+    const i = this.state.operators.findIndex((o) => o.id === record.id || (o.sourceCode === record.sourceCode && o.effectiveFrom === record.effectiveFrom));
+    if (i >= 0) this.state.operators[i] = { ...record, id: this.state.operators[i].id };
+    else this.state.operators.push(record);
+    this.persist();
   }
 
   async getSetting<T>(key: string) {
@@ -143,6 +189,8 @@ function revive(raw: State): State {
     jobs: (raw.jobs ?? []).map((j) => ({ ...j, lockedAt: d(j.lockedAt) })),
     runs: (raw.runs ?? []).map((r) => ({ ...r, startedAt: d(r.startedAt)!, finishedAt: d(r.finishedAt) })),
     snapshots: (raw.snapshots ?? []).map((s) => ({ ...s, capturedAt: d(s.capturedAt)! })),
+    sprintWindows: (raw.sprintWindows ?? []).map((w) => ({ ...w, updatedAt: d(w.updatedAt)! })),
+    operators: (raw.operators ?? []).map((o) => ({ ...o, updatedAt: d(o.updatedAt)! })),
     settings: raw.settings ?? {},
   };
 }

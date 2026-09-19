@@ -1,7 +1,9 @@
 import type { DataProvider } from "../repositories/types";
 import { resolveTerms } from "../repositories/types";
-import type { JobDefinitionRecord, JobKey, MetricFamily } from "../store/types";
+import type { AppStore, JobDefinitionRecord, JobKey, MetricFamily } from "../store/types";
 import { buildBreakdown } from "../metadata/clearance-breakdown";
+import { captureSprint } from "../services/sprint";
+import { buildAcademicYears } from "../services/history";
 
 /**
  * Scheduled refresh jobs (Spec §14.6). Each job reads from the DataProvider and produces
@@ -17,7 +19,8 @@ export interface JobDefinition {
   family: MetricFamily;
   defaultCron: string;
   minIntervalMinutes: number;
-  run(provider: DataProvider): Promise<{ payload: unknown; rowCount: number | null; termKey: string | null }>;
+  /** `store` is passed for jobs that need application-owned configuration (e.g. the sprint window). */
+  run(provider: DataProvider, store: AppStore): Promise<{ payload: unknown; rowCount: number | null; termKey: string | null }>;
 }
 
 async function currentTermKey(provider: DataProvider): Promise<string> {
@@ -80,6 +83,56 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
       const [counts, termKey] = await Promise.all([provider.getClassificationCounts(), currentTermKey(provider)]);
       const rows = buildBreakdown(counts.enrolled, counts.cleared);
       return { payload: rows, rowCount: rows.find((r) => r.isTotal)?.enrolled ?? null, termKey };
+    },
+  },
+  {
+    key: "sprint.daily",
+    name: "Clearance sprint (by date, operator, classification)",
+    family: "sprintDaily",
+    // Every 15 minutes during the sprint; outside a configured window the run captures an empty payload.
+    defaultCron: "*/15 * * * *",
+    minIntervalMinutes: 5,
+    async run(provider, store) {
+      const terms = resolveTerms(await provider.getTermMetadata());
+      const { payload, rowCount } = await captureSprint(provider, store);
+      return { payload, rowCount, termKey: terms.current.tradName };
+    },
+  },
+  {
+    key: "history.enrollmentClearance",
+    name: "Historical enrolled vs. financially cleared",
+    family: "historyEnrollment",
+    // The figures only change when the nightly 9 pm job writes them, so once a day at 21:10 is enough.
+    defaultCron: "10 21 * * *",
+    minIntervalMinutes: 60,
+    async run(provider) {
+      const terms = await provider.getTermMetadata();
+      const payload = buildAcademicYears(terms);
+      return { payload, rowCount: payload.length, termKey: resolveTerms(terms).current.tradName };
+    },
+  },
+  {
+    key: "history.globalBalances",
+    name: "Global receivables and credit balances",
+    family: "historyBalances",
+    defaultCron: "15 21 * * *",
+    minIntervalMinutes: 60,
+    async run(provider) {
+      const [payload, termKey] = await Promise.all([provider.getGlobalBalances(), currentTermKey(provider)]);
+      return { payload, rowCount: payload.positiveCount, termKey };
+    },
+  },
+  {
+    key: "history.receivablesBySemester",
+    name: "Receivables by semester",
+    family: "historyReceivables",
+    defaultCron: "20 21 * * *",
+    minIntervalMinutes: 60,
+    // The raw per-term rows are captured; mapping codes to semesters happens at read time, so a later
+    // fix to the resolver corrects the whole archive instead of needing every snapshot re-captured.
+    async run(provider) {
+      const [payload, termKey] = await Promise.all([provider.getReceivablesByTerm(), currentTermKey(provider)]);
+      return { payload, rowCount: payload.length, termKey };
     },
   },
   {

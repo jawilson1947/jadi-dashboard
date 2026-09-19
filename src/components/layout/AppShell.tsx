@@ -1,18 +1,18 @@
-import Link from "next/link";
 import { formatDateTime } from "@/lib/format";
 import type { Permission } from "@/server/authz/permissions";
-import { NavLinks, type NavItem } from "./NavLinks";
+import type { NavItem } from "./NavLinks";
+import { Sidebar } from "./Sidebar";
 import { UserMenu } from "./UserMenu";
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Current Semester", permission: "dashboard.view" },
-  { href: "/clearance-sprint", label: "Clearance Sprint", permission: "dashboard.view" },
-  { href: "/dnr-dnc", label: "DNR / DNC Analysis", permission: "student.view" },
-  { href: "/historical", label: "Historical Analysis", permission: "history.view" },
-  { href: "/students", label: "Student Lookup", permission: "student.view" },
-  { href: "/reports", label: "Reports & Analyses", permission: "dashboard.view" },
-  { href: "/ai", label: "AI Analyses", permission: "ai.view" },
-  { href: "/admin", label: "Administration", permission: "metadata.manage" },
+  { href: "/dashboard", label: "Current Semester", abbr: "CUR", permission: "dashboard.view" },
+  { href: "/clearance-sprint", label: "Clearance Sprint", abbr: "SPR", permission: "dashboard.view" },
+  { href: "/dnr-dnc", label: "DNR / DNC Analysis", abbr: "DNR", permission: "student.view" },
+  { href: "/historical", label: "Historical Analysis", abbr: "HIS", permission: "history.view" },
+  { href: "/students", label: "Student Lookup", abbr: "STU", permission: "student.view" },
+  { href: "/reports", label: "Reports & Analyses", abbr: "RPT", permission: "dashboard.view" },
+  { href: "/ai", label: "AI Analyses", abbr: "AI", permission: "ai.view" },
+  { href: "/admin", label: "Administration", abbr: "ADM", permission: "metadata.manage" },
 ];
 
 interface AppShellProps {
@@ -32,14 +32,7 @@ export function AppShell({ user, permissions, termLabel, refreshedAt, stale, tim
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:bg-surface-1 focus:p-2 focus:rounded">
         Skip to main content
       </a>
-      <aside className="w-60 shrink-0 border-r border-border bg-surface-1 flex flex-col" aria-label="Primary">
-        <Link href="/dashboard" className="flex items-center gap-2 px-4 py-4 border-b border-border">
-          <span aria-hidden className="h-7 w-7 rounded-md bg-brand" />
-          <span className="font-semibold leading-tight">JADI Billing</span>
-        </Link>
-        <NavLinks items={visible} />
-        <div className="mt-auto px-4 py-3 text-xs text-ink-3 border-t border-border">Analysis only — no writes to Jenzabar.</div>
-      </aside>
+      <Sidebar items={visible} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="app-header flex items-center gap-4 px-6 h-14 border-b border-border bg-surface-1">

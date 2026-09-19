@@ -1,5 +1,6 @@
 import { getDashPool, sql } from "../db/mssql";
-import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, SnapshotRecord } from "./types";
+import { randomUUID } from "node:crypto";
+import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, SnapshotRecord, SprintWindowRecord } from "./types";
 
 /** SQL Server AppStore over ousadb schema [dash] (db/migrations/001_init.sql), login jadi_dash. */
 export class MssqlAppStore implements AppStore {
@@ -97,6 +98,68 @@ export class MssqlAppStore implements AppStore {
     return r.recordset[0] ? mapSnapshot<T>(r.recordset[0]) : null;
   }
 
+  /**
+   * Newest snapshot per termKey (Spec §7.4 prior-semester overlay). The current term's snapshot is
+   * refreshed constantly, so ROW_NUMBER per termKey keeps one row each instead of scanning history.
+   */
+  async latestSnapshotsByTerm<T>(family: MetricFamily, limit = 12) {
+    const r = await (await this.pool()).request().input("family", sql.VarChar(50), family).input("limit", sql.Int, limit)
+      .query<SnapshotRow>(`WITH ranked AS (
+           SELECT *, ROW_NUMBER() OVER (PARTITION BY termKey ORDER BY capturedAt DESC) AS rn
+           FROM dash.Snapshot WHERE metricFamily = @family)
+         SELECT TOP (@limit) id, jobRunId, metricFamily, termKey, capturedAt, sourceProvider, payload, [rowCount]
+         FROM ranked WHERE rn = 1 ORDER BY capturedAt DESC`);
+    return r.recordset.map((row) => mapSnapshot<T>(row));
+  }
+
+  async listSprintWindows(): Promise<SprintWindowRecord[]> {
+    const r = await (await this.pool()).request().query<SprintRow>("SELECT termKey, sprintStart, sprintEnd, updatedAt, updatedBy FROM dash.SemesterSprint ORDER BY sprintStart DESC");
+    return r.recordset.map(mapSprint);
+  }
+  async getSprintWindow(termKey: string): Promise<SprintWindowRecord | null> {
+    const r = await (await this.pool()).request().input("termKey", sql.VarChar(50), termKey)
+      .query<SprintRow>("SELECT termKey, sprintStart, sprintEnd, updatedAt, updatedBy FROM dash.SemesterSprint WHERE termKey = @termKey");
+    return r.recordset[0] ? mapSprint(r.recordset[0]) : null;
+  }
+  async setSprintWindow(termKey: string, start: string, end: string, updatedBy: string | null) {
+    await (await this.pool())
+      .request()
+      .input("termKey", sql.VarChar(50), termKey)
+      .input("start", sql.Date, start)
+      .input("end", sql.Date, end)
+      .input("by", sql.VarChar(200), updatedBy)
+      .query(`MERGE dash.SemesterSprint AS t USING (SELECT @termKey AS termKey) AS s ON t.termKey = s.termKey
+              WHEN MATCHED THEN UPDATE SET sprintStart = @start, sprintEnd = @end, updatedAt = SYSUTCDATETIME(), updatedBy = @by
+              WHEN NOT MATCHED THEN INSERT (termKey, sprintStart, sprintEnd, updatedBy) VALUES (@termKey, @start, @end, @by);`);
+  }
+
+  async listOperatorProfiles(): Promise<OperatorProfileRecord[]> {
+    const r = await (await this.pool()).request()
+      .query<OperatorRow>("SELECT id, sourceCode, displayName, email, department, isActive, isSystem, effectiveFrom, effectiveTo, updatedAt, updatedBy FROM dash.OperatorProfile ORDER BY sourceCode, effectiveFrom");
+    return r.recordset.map(mapOperator);
+  }
+  async upsertOperatorProfile(o: OperatorProfileRecord) {
+    await (await this.pool())
+      .request()
+      .input("id", sql.UniqueIdentifier, o.id || randomUUID())
+      .input("code", sql.VarChar(50), o.sourceCode)
+      .input("name", sql.NVarChar(200), o.displayName)
+      .input("email", sql.VarChar(320), o.email)
+      .input("dept", sql.NVarChar(200), o.department)
+      .input("active", sql.Bit, o.isActive)
+      .input("system", sql.Bit, o.isSystem)
+      .input("from", sql.Date, o.effectiveFrom)
+      .input("to", sql.Date, o.effectiveTo)
+      .input("by", sql.VarChar(200), o.updatedBy)
+      .query(`MERGE dash.OperatorProfile AS t
+              USING (SELECT @id AS id, @code AS sourceCode, @from AS effectiveFrom) AS s
+                ON t.id = s.id OR (t.sourceCode = s.sourceCode AND ((t.effectiveFrom IS NULL AND s.effectiveFrom IS NULL) OR t.effectiveFrom = s.effectiveFrom))
+              WHEN MATCHED THEN UPDATE SET displayName = @name, email = @email, department = @dept, isActive = @active,
+                                           isSystem = @system, effectiveTo = @to, updatedAt = SYSUTCDATETIME(), updatedBy = @by
+              WHEN NOT MATCHED THEN INSERT (id, sourceCode, displayName, email, department, isActive, isSystem, effectiveFrom, effectiveTo, updatedBy)
+                                   VALUES (@id, @code, @name, @email, @dept, @active, @system, @from, @to, @by);`);
+  }
+
   async getSetting<T>(key: string) {
     const r = await (await this.pool()).request().input("key", sql.VarChar(100), key).query<{ value: string }>("SELECT value FROM dash.Setting WHERE [key] = @key");
     return r.recordset[0] ? (JSON.parse(r.recordset[0].value) as T) : null;
@@ -114,6 +177,20 @@ export class MssqlAppStore implements AppStore {
 }
 
 type SnapshotRow = Omit<SnapshotRecord, "payload"> & { payload: string };
+type SprintRow = { termKey: string; sprintStart: Date | string; sprintEnd: Date | string; updatedAt: Date | string; updatedBy: string | null };
+type OperatorRow = Omit<OperatorProfileRecord, "effectiveFrom" | "effectiveTo" | "updatedAt"> & { effectiveFrom: Date | string | null; effectiveTo: Date | string | null; updatedAt: Date | string };
+
+/** SQL `date` arrives as a Date at UTC midnight; keep the calendar date, never a local-time shift. */
+function isoDate(v: Date | string | null): string | null {
+  if (v === null) return null;
+  return typeof v === "string" ? v.slice(0, 10) : v.toISOString().slice(0, 10);
+}
+function mapSprint(r: SprintRow): SprintWindowRecord {
+  return { termKey: r.termKey, start: isoDate(r.sprintStart)!, end: isoDate(r.sprintEnd)!, updatedAt: new Date(r.updatedAt), updatedBy: r.updatedBy };
+}
+function mapOperator(r: OperatorRow): OperatorProfileRecord {
+  return { ...r, isActive: Boolean(r.isActive), isSystem: Boolean(r.isSystem), effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDate(r.effectiveTo), updatedAt: new Date(r.updatedAt) };
+}
 
 function mapJob(r: JobDefinitionRecord): JobDefinitionRecord {
   return { ...r, isEnabled: Boolean(r.isEnabled), lockedAt: r.lockedAt ? new Date(r.lockedAt) : null };

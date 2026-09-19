@@ -137,6 +137,16 @@ Reading: `LastCleared` is effectively the term the student record was last rolle
 | dashboard.chargesCredits | charges $17,075,603 · credits $7,302,949 · after drop date | 47 ms |
 | dashboard.dnrDnc | DNC 73 / $417,758.99 · DNR 111 / $372,458.63 · guard 0 | 273 ms |
 
+### 8.8 Sprint history is forward-only (Sec.7.4, decided 2026-09-18)
+
+All `VIEW_OURM_*` views are scoped to `tblOUSA.isCurrent = 1`, so dated clearance actions exist for the **current term only**; `tblStudent.LastCleared` carries a term code, not a date. An earlier sprint's **daily shape** therefore cannot be reconstructed. Consequence for Sec.7.4: the app archives one `sprintDaily` snapshot per term and the day-of-sprint overlay reads that archive; Fall 2026 is the first captured sprint, so curves for earlier terms begin with Spring 2027. Backfilling the shape would need read access to the underlying Jenzabar `items` rows with a term filter — open question 8 in ASSUMPTIONS.md.
+
+**Prior-semester TOTALS are available, and are what the Compare tab draws (J. Wilson, 2026-09-18).** `LastCleared` matches `tblOUSA.JADI_TradName` / `JADI_LeapName` for *every* row, not only the `isCurrent` / `wasCurrent` ones, so any semester's metadata can be derived from a matching record (`'XX0000'` = never cleared falls through). The Compare tab therefore benchmarks the running sprint against the same-season prior semesters' **nightly `tblOUSA.FinanciallyCleared`** figures — the official historical number under A-2 — drawn as dotted target rules with census and cleared-%-of-census beside them. Counting `LastCleared = <term>` instead would give 1,153 for FA2026 against the official 1,012: that is the rolled-to population, not clearance actions, so it is deliberately not used as the benchmark.
+
+The general `LastCleared` → `tblOUSA` resolver (term code → semester name, academic year, dates, nightly figures, Traditional vs LEAP) is **deferred to Phase 4** with Historical Analysis, where Sec.9.3 "receivables by semester" needs it. Until then term codes render raw (`FA2025`) outside the current/previous pair.
+
+Sprint counting rule (implemented in `Q.sprintPrelude`): each student is counted on their **first** clearance action inside the window (`ROW_NUMBER() OVER (PARTITION BY ID_NUMBER ORDER BY DateCleared, USER_NAME) = 1`). That is the same one-row-per-student dedup as the hero card (A-2), so By Date, By Operator and By Classification each sum to Cleared. It differs from the Phase 2 prelude only for the 7 students with two clearance actions, whose operator attribution now follows the first action rather than `MIN(USER_NAME)`.
+
 ### 8.7 Remaining follow-ups
 - Narrow the `VIEW_OURM_TRANS_HIST` SOURCE_CDE query (e.g. `TOP` by month) or run it against `[jadi].dbo.trans_hist` with a term filter.
 - Confirm with the DBA where `[172.18.96.11]\TMSEPRD` and `[JICSSQL]` point on staging.

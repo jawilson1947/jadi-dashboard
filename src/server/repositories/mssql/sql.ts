@@ -35,6 +35,18 @@ WITH cur AS (SELECT JADI_TradName AS t, JADI_LeapName AS l FROM dbo.tblOUSA WHER
 const EPILOGUE = `
 DROP TABLE #enrolled; DROP TABLE #cleared;`;
 
+/**
+ * Classification bucket exactly as decided in A-19 and mirrored by breakdownCode():
+ * TEL_WEB_GRP_CDE = 22 ("Incoming Transfer") wins over the class code, then FF/FR collapse to FR,
+ * then blank becomes XX. Used by both the term-wide and sprint-scoped counts so they cannot drift.
+ */
+function CLASS_BUCKET(alias: string): string {
+  return `CASE WHEN LTRIM(RTRIM(CAST(${alias}.TEL_WEB_GRP_CDE AS varchar(10)))) = '22' THEN 'TR'
+              WHEN UPPER(LTRIM(RTRIM(ISNULL(${alias}.CURRENT_CLASS_CDE, '')))) IN ('FF', 'FR') THEN 'FR'
+              WHEN LTRIM(RTRIM(ISNULL(${alias}.CURRENT_CLASS_CDE, ''))) = '' THEN 'XX'
+              ELSE UPPER(LTRIM(RTRIM(${alias}.CURRENT_CLASS_CDE))) END`;
+}
+
 export const Q = {
   terms: `
 SELECT id, SemesterName, JADI_TradName, JADI_LeapName, JADI_YR_CDE, SemesterBegins, SemesterEnds,
@@ -82,14 +94,19 @@ SELECT
    * ISNULL(CURRENT_CLASS_CDE,''). FCA rows = VIEW_OURM ∩ student_master; STATS [rows]=1 = distinct VIEW_OURM_CLEARED.
    * Returns (kind, code, n); the service applies the fixed class list, NotCleared, %, and Total.
    */
+  /**
+   * Clearance Breakdown, whole term (Spec §7.3) — fast equivalent of
+   * docs/validation-sql/clearance_by_classification.sql. In the supplied query the columns come from
+   * FCA.cCode = ISNULL(student_master.CURRENT_CLASS_CDE,'XX') and FCA.what / STATS.what =
+   * 'Incoming Transfer' when TEL_WEB_GRP_CDE = 22; CLASS_BUCKET() encodes exactly that rule and is
+   * shared with the sprint-scoped version, so the two can never drift apart.
+   * FCA rows = VIEW_OURM ∩ student_master; STATS [rows] = 1 = distinct VIEW_OURM_CLEARED.
+   * Returns (kind, code, n); the service applies the fixed class list, NotCleared, %, and Total.
+   */
   classificationCounts: `
 SET NOCOUNT ON;
 WITH sm AS (
-  SELECT CAST(ID_NUM AS varchar(50)) AS idnumber,
-         CASE WHEN LTRIM(RTRIM(CAST(TEL_WEB_GRP_CDE AS varchar(10)))) = '22' THEN 'TR'
-              WHEN UPPER(LTRIM(RTRIM(ISNULL(CURRENT_CLASS_CDE, '')))) IN ('FF', 'FR') THEN 'FR'
-              WHEN LTRIM(RTRIM(ISNULL(CURRENT_CLASS_CDE, ''))) = '' THEN 'XX'
-              ELSE UPPER(LTRIM(RTRIM(CURRENT_CLASS_CDE))) END AS code
+  SELECT CAST(ID_NUM AS varchar(50)) AS idnumber, ${CLASS_BUCKET("student_master")} AS code
   FROM [jadi].[dbo].[student_master]
 ),
 e AS (SELECT CAST(idnumber AS varchar(50)) AS idnumber FROM dbo.VIEW_OURM),
@@ -97,6 +114,108 @@ c AS (SELECT DISTINCT CAST(ID_NUMBER AS varchar(50)) AS idnumber FROM dbo.VIEW_O
 SELECT 'enrolled' AS kind, sm.code, COUNT(*) AS n FROM e JOIN sm ON sm.idnumber = e.idnumber GROUP BY sm.code
 UNION ALL
 SELECT 'cleared',  sm.code, COUNT(*)      FROM c JOIN sm ON sm.idnumber = c.idnumber GROUP BY sm.code;`,
+
+  /**
+   * Clearance Sprint (Spec §7). Every sprint metric is built from ONE population: the student's
+   * FIRST clearance action (ROW_NUMBER = 1), which is the same [rows] = 1 dedup the hero card uses
+   * (A-2) — so a student is counted on exactly one day, for one operator, in one classification, and
+   * the sprint totals reconcile with Cleared on the dashboard.
+   * The window is a pair of calendar dates: >= @start and < @end + 1 day, so the whole end day counts.
+   * #enrolled is materialized rather than correlated (a correlated NOT EXISTS on VIEW_OURM took 107 s).
+   */
+  sprintPrelude: (withEnrolled = false) => `
+SET NOCOUNT ON;
+SELECT idnumber, DateCleared, ClearedBy
+INTO #first
+FROM (SELECT CAST(ID_NUMBER AS varchar(50)) AS idnumber, DateCleared, USER_NAME AS ClearedBy,
+             ROW_NUMBER() OVER (PARTITION BY ID_NUMBER ORDER BY DateCleared, USER_NAME) AS rn
+      FROM dbo.VIEW_OURM_CLEARED) r
+WHERE rn = 1 AND DateCleared >= @start AND DateCleared < DATEADD(day, 1, @end);
+CREATE UNIQUE CLUSTERED INDEX ix_f ON #first(idnumber);${
+    withEnrolled
+      ? `
+SELECT CAST(idnumber AS varchar(50)) AS idnumber INTO #enrolled FROM dbo.VIEW_OURM;
+CREATE UNIQUE CLUSTERED INDEX ix_e ON #enrolled(idnumber);`
+      : ""
+  }`,
+
+  sprintEpilogue: (withEnrolled = false) => `
+DROP TABLE #first;${withEnrolled ? " DROP TABLE #enrolled;" : ""}`,
+
+  /** §7.1 — students cleared per calendar day inside the window. */
+  clearanceByDate: `
+SELECT CAST(DateCleared AS date) AS d, COUNT(*) AS n
+FROM #first GROUP BY CAST(DateCleared AS date) ORDER BY 1;`,
+
+  /** §7.2 — per ClearedBy code, with first/last action (seeds OperatorProfile effective dates). */
+  clearanceByOperator: `
+SELECT ISNULL(ClearedBy, '') AS code, COUNT(*) AS n, MIN(DateCleared) AS firstAt, MAX(DateCleared) AS lastAt
+FROM #first GROUP BY ISNULL(ClearedBy, '') ORDER BY n DESC;`,
+
+  /** §7.3 scoped to the sprint window: enrolled is current enrollment, cleared is actions inside the window. */
+  classificationCountsInRange: `
+SELECT 'enrolled' AS kind, ${CLASS_BUCKET("sm")} AS code, COUNT(*) AS n
+FROM #enrolled e JOIN [jadi].[dbo].[student_master] sm ON CAST(sm.ID_NUM AS varchar(50)) = e.idnumber
+GROUP BY ${CLASS_BUCKET("sm")}
+UNION ALL
+SELECT 'cleared', ${CLASS_BUCKET("sm")}, COUNT(*)
+FROM #first f JOIN [jadi].[dbo].[student_master] sm ON CAST(sm.ID_NUM AS varchar(50)) = f.idnumber
+GROUP BY ${CLASS_BUCKET("sm")};`,
+
+  /** Students behind a sprint cell (day / operator / classification). Filters are parameterized. */
+  sprintStudentPage: (where: string, sortColumn: string, dir: "ASC" | "DESC") => `
+SELECT S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode, S.ClearedCurrentSession, S.AccountBalance, S.LastCleared,
+       f.ClearedBy, f.DateCleared,
+       CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
+       CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer
+FROM #first f
+JOIN dbo.tblStudent S ON S.idnumber = f.idnumber
+LEFT JOIN #enrolled e ON e.idnumber = f.idnumber
+LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = f.idnumber
+WHERE ${where}
+ORDER BY ${sortColumn} ${dir}, S.idnumber
+OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;`,
+
+  sprintStudentCount: (where: string) => `
+SELECT COUNT(*) AS n
+FROM #first f
+JOIN dbo.tblStudent S ON S.idnumber = f.idnumber
+LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = f.idnumber
+WHERE ${where};`,
+
+  /** Sprint filter fragments; every value is bound, never interpolated. */
+  sprintWhere: {
+    all: "1 = 1",
+    day: "CAST(f.DateCleared AS date) = @day",
+    operator: "ISNULL(f.ClearedBy, '') = @operator",
+    classification: `${CLASS_BUCKET("SM")} = @classification`,
+  } as const,
+
+  /**
+   * Spec §9.2 — global balance totals in one scan of tblStudent. `AccountBalance` is the
+   * authoritative column (A-18, decided 2026-09-18); the negative total is reported as an absolute
+   * value and is never netted against the positive one (A-5).
+   */
+  globalBalances: `
+SELECT
+  ISNULL(SUM(CASE WHEN AccountBalance > 0 THEN AccountBalance END), 0) AS positiveTotal,
+  SUM(CASE WHEN AccountBalance > 0 THEN 1 ELSE 0 END)                  AS positiveCount,
+  ISNULL(ABS(SUM(CASE WHEN AccountBalance < 0 THEN AccountBalance END)), 0) AS negativeTotal,
+  SUM(CASE WHEN AccountBalance < 0 THEN 1 ELSE 0 END)                  AS negativeCount,
+  SUM(CASE WHEN AccountBalance = 0 THEN 1 ELSE 0 END)                  AS zeroCount
+FROM dbo.tblStudent;`,
+
+  /**
+   * Spec §9.3 — positive balances grouped by the term code in LastCleared (A-22). Grouping happens in
+   * SQL; mapping a code to its semester, and splitting summer (A-23) and unmatched codes out, happens
+   * in the service, so one resolver serves every screen.
+   */
+  receivablesByTerm: `
+SELECT ISNULL(LastCleared, '') AS termKey, COUNT(*) AS students, SUM(AccountBalance) AS positiveBalance
+FROM dbo.tblStudent
+WHERE AccountBalance > 0
+GROUP BY ISNULL(LastCleared, '')
+ORDER BY 1;`,
 
   /** Drill-down populations as WHERE fragments over alias S (tblStudent) with cur/prev and #enrolled/#cleared available. */
   populationWhere: {
@@ -124,6 +243,38 @@ LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = S
 WHERE ${where}
 ORDER BY ${sortColumn} ${dir}, S.idnumber
 OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;${EPILOGUE}`,
+
+  /**
+   * The whole DNR/DNC population (Spec §8) in one batch: both categories, the A-1 rules verbatim
+   * (including the DNR enrollment guard), the columns §8 lists, and the A-19 transfer flag. Bounded by
+   * `AccountBalance > 0`, so TOP is a safety net rather than paging — the service does the filtering,
+   * sorting and totalling so the table, its footer and the export always agree.
+   */
+  dnrDncPopulation: `${PRELUDE}
+SELECT TOP (@limit) category, idnumber, lastname, firstname, midname, pid, email, cCode, ClearedCurrentSession,
+       AccountBalance, LastCleared, ClearedBy, DateCleared, enrolled, isIncomingTransfer
+FROM (
+  SELECT 'DNC' AS category, S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode,
+         S.ClearedCurrentSession, S.AccountBalance, S.LastCleared, c.ClearedBy, c.DateCleared,
+         CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
+         CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer
+  FROM dbo.tblStudent S
+  LEFT JOIN #cleared c ON c.idnumber = S.idnumber
+  LEFT JOIN #enrolled e ON e.idnumber = S.idnumber
+  LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = S.idnumber
+  WHERE ${"EXISTS (SELECT 1 FROM cur WHERE S.LastCleared IN (cur.t, cur.l)) AND ISNULL(S.ClearedCurrentSession, 0) = 0 AND S.AccountBalance > 0"}
+  UNION ALL
+  SELECT 'DNR', S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode,
+         S.ClearedCurrentSession, S.AccountBalance, S.LastCleared, c.ClearedBy, c.DateCleared,
+         CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END,
+         CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END
+  FROM dbo.tblStudent S
+  LEFT JOIN #cleared c ON c.idnumber = S.idnumber
+  LEFT JOIN #enrolled e ON e.idnumber = S.idnumber
+  LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = S.idnumber
+  WHERE ${"EXISTS (SELECT 1 FROM prev WHERE S.LastCleared IN (prev.t, prev.l)) AND S.ClearedCurrentSession = 1 AND S.AccountBalance > 0 AND NOT EXISTS (SELECT 1 FROM #enrolled e2 WHERE e2.idnumber = S.idnumber)"}
+) p
+ORDER BY category, lastname, firstname, idnumber;${EPILOGUE}`,
 
   studentCount: (where: string) => `${PRELUDE}
 SELECT COUNT(*) AS n FROM dbo.tblStudent S WHERE ${where};${EPILOGUE}`,

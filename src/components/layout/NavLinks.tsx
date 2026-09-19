@@ -7,13 +7,15 @@ import type { Permission } from "@/server/authz/permissions";
 export interface NavItem {
   href: string;
   label: string;
+  /** Three-letter code shown when the sidebar is collapsed; the full label stays available to screen readers. */
+  abbr: string;
   permission: Permission;
 }
 
-export function NavLinks({ items }: { items: NavItem[] }) {
+export function NavLinks({ items, collapsed = false }: { items: NavItem[]; collapsed?: boolean }) {
   const pathname = usePathname();
   return (
-    <nav className="p-2 space-y-0.5">
+    <nav id="primary-nav" className="p-2 space-y-0.5" aria-label="Sections">
       {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         return (
@@ -21,11 +23,19 @@ export function NavLinks({ items }: { items: NavItem[] }) {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className={`block rounded-md px-3 py-2 text-sm ${
+            title={collapsed ? item.label : undefined}
+            className={`block rounded-md px-3 py-2 text-sm ${collapsed ? "text-center font-mono tracking-tight" : ""} ${
               active ? "bg-brand-track text-ink font-medium" : "text-ink-2 hover:bg-surface-2"
             }`}
           >
-            {item.label}
+            {collapsed ? (
+              <>
+                <span aria-hidden>{item.abbr}</span>
+                <span className="sr-only">{item.label}</span>
+              </>
+            ) : (
+              item.label
+            )}
           </Link>
         );
       })}

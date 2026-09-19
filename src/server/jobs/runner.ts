@@ -69,7 +69,7 @@ export async function runJob(key: JobKey, opts: RunOptions): Promise<JobRunRecor
 
   await store.createRun(run);
   try {
-    const result = await def.run(provider);
+    const result = await def.run(provider, store);
     const capturedAt = now();
     await store.saveSnapshot({
       id: randomUUID(),

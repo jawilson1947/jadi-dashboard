@@ -5,6 +5,9 @@ import { DEFAULT_CLASSIFICATION_MAPPINGS } from "@/server/metadata/classificatio
 import { getConfig } from "@/server/db/config";
 import { formatCount, formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { SprintDatesForm } from "@/components/admin/sprint/SprintDatesForm";
+import { getAppStore } from "@/server/store";
+import { formatIsoDate } from "@/lib/dates";
 
 export const metadata = { title: "Semester metadata" };
 export const dynamic = "force-dynamic";
@@ -17,6 +20,9 @@ export default async function MetadataPage() {
   requirePermission(await getPrincipal(), "metadata.manage");
   const tz = getConfig().APP_TIMEZONE;
   const t = await getCurrentTerms();
+  const store = getAppStore();
+  const sprintWindows = await store.listSprintWindows();
+  const currentSprint = sprintWindows.find((w) => w.termKey === t.current.tradName) ?? null;
   const rows = [...t.all].sort((a, b) => b.semesterBegins.getTime() - a.semesterBegins.getTime());
   const fmtDate = (d: Date | null) => (d ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: tz }).format(d) : "—");
 
@@ -26,6 +32,25 @@ export default async function MetadataPage() {
         title="Semester / JADI metadata"
         description={`Source: tblOUSA (${t.source.kind === "snapshot" ? `snapshot captured ${formatDateTime(t.source.capturedAt, tz)}` : "live read"}). Current = ${t.current.tradName} / ${t.current.leapName}; previous = ${t.previous.tradName} / ${t.previous.leapName}. Edits are made in the JADI setup application; this page is read-only.`}
       />
+
+      <section className="card space-y-3">
+        <h2 className="text-sm font-medium text-ink-2">Clearance sprint window — {t.current.tradName}</h2>
+        <p className="text-xs text-ink-3">
+          Entered per semester (ASSUMPTIONS A-10, decided 2026-09-18): the application does not derive a default from SemesterBegins or the drop date, because clearance activity does not
+          follow the published calendar. Stored in the application’s own tables — tblOUSA is never written. Changing the dates re-captures the sprint snapshot on the next page load.
+        </p>
+        <SprintDatesForm
+          termKey={t.current.tradName}
+          termLabel={t.current.semesterName}
+          initial={currentSprint ? { start: currentSprint.start, end: currentSprint.end } : null}
+          hint={currentSprint ? `Current window: ${formatIsoDate(currentSprint.start)} → ${formatIsoDate(currentSprint.end)} (updated ${formatDateTime(currentSprint.updatedAt, tz)}).` : "No sprint window set for this semester yet — the Clearance Sprint page stays empty until both dates are entered."}
+        />
+        {sprintWindows.length > 1 ? (
+          <p className="text-xs text-ink-3">
+            Other semesters with windows: {sprintWindows.filter((w) => w.termKey !== t.current.tradName).map((w) => `${w.termKey} (${formatIsoDate(w.start)} → ${formatIsoDate(w.end)})`).join(", ")}
+          </p>
+        ) : null}
+      </section>
 
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm">

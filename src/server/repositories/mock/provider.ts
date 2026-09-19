@@ -1,8 +1,17 @@
 import { breakdownCode } from "../../metadata/clearance-breakdown";
+import { getConfig } from "../../db/config";
+import { toIsoDate } from "@/lib/dates";
 import type {
   ChargesCredits,
   ClassificationCounts,
+  ClearanceByDateRow,
+  ClearanceByOperatorRow,
   DataProvider,
+  DateRange,
+  DnrDncRow,
+  GlobalBalances,
+  ReceivableByTermRow,
+  SprintStudentFilter,
   DnrDncSummary,
   DrillDownPopulation,
   EnrollmentClearance,
@@ -91,7 +100,7 @@ export class MockDataProvider implements DataProvider {
   }
 
   /** Enrolled from VIEW_OURM rows; Cleared from clearance actions (both mapped with breakdownCode). */
-  async getClassificationCounts(): Promise<ClassificationCounts> {
+  async getClassificationCounts(range?: DateRange): Promise<ClassificationCounts> {
     const enrolled = new Map<string, number>();
     const cleared = new Map<string, number>();
     for (const s of this.enrolled()) {
@@ -99,10 +108,104 @@ export class MockDataProvider implements DataProvider {
       enrolled.set(k, (enrolled.get(k) ?? 0) + 1);
     }
     for (const s of this.clearanceActions()) {
+      if (range && !this.inRange(s.clearedAt, range)) continue;
       const k = breakdownCode(s.classificationCode, s.isIncomingTransfer);
       cleared.set(k, (cleared.get(k) ?? 0) + 1);
     }
     return { enrolled, cleared };
+  }
+
+  /** Spec §7.1 — one row per day that had at least one clearance action. */
+  async getClearanceByDate(range: DateRange): Promise<ClearanceByDateRow[]> {
+    const byDate = new Map<string, number>();
+    for (const s of this.clearanceActionsIn(range)) {
+      const day = this.day(s.clearedAt!);
+      byDate.set(day, (byDate.get(day) ?? 0) + 1);
+    }
+    return [...byDate.entries()].map(([date, cleared]) => ({ date, cleared })).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /** Spec §7.2 — per ClearedBy code, with first/last action for operator effective-date seeding. */
+  async getClearanceByOperator(range: DateRange): Promise<ClearanceByOperatorRow[]> {
+    const rows = new Map<string, ClearanceByOperatorRow>();
+    for (const s of this.clearanceActionsIn(range)) {
+      const code = s.clearedBy ?? "";
+      const at = s.clearedAt!;
+      const row = rows.get(code) ?? { operatorCode: code, cleared: 0, firstAt: at, lastAt: at };
+      row.cleared += 1;
+      if (row.firstAt === null || at < row.firstAt) row.firstAt = at;
+      if (row.lastAt === null || at > row.lastAt) row.lastAt = at;
+      rows.set(code, row);
+    }
+    return [...rows.values()].sort((a, b) => b.cleared - a.cleared || a.operatorCode.localeCompare(b.operatorCode));
+  }
+
+  async getSprintStudents(filter: SprintStudentFilter, page: PageRequest): Promise<Page<StudentRow>> {
+    const all = this.clearanceActionsIn(filter.range).filter((s) => {
+      if (filter.date && this.day(s.clearedAt!) !== filter.date) return false;
+      if (filter.operatorCode !== undefined && (s.clearedBy ?? "") !== filter.operatorCode) return false;
+      if (filter.classificationCode && breakdownCode(s.classificationCode, s.isIncomingTransfer) !== filter.classificationCode) return false;
+      return true;
+    });
+    const sorted = sortRows(all, page.sort);
+    const start = (page.page - 1) * page.pageSize;
+    return { rows: sorted.slice(start, start + page.pageSize), page: page.page, pageSize: page.pageSize, totalRows: all.length };
+  }
+
+  /** Clearance actions with a timestamp inside the window (undated actions cannot be placed on a day). */
+  private clearanceActionsIn(range: DateRange): StudentRow[] {
+    return this.clearanceActions().filter((s) => this.inRange(s.clearedAt, range));
+  }
+
+  private inRange(at: Date | null, range: DateRange): boolean {
+    if (!at) return false;
+    const day = this.day(at);
+    return day >= range.start && day <= range.end;
+  }
+
+  /** Calendar date of an action in the institution timezone — the same boundary the SQL provider uses. */
+  private day(at: Date): string {
+    return toIsoDate(at, getConfig().APP_TIMEZONE);
+  }
+
+  /** Spec §8: DNC first, then DNR; both already positive-balance by the A-1 rule. */
+  async getDnrDncPopulation(limit = 5000): Promise<DnrDncRow[]> {
+    const rows: DnrDncRow[] = [
+      ...this.population("dnc").map((s) => ({ ...s, category: "DNC" as const })),
+      ...this.population("dnr").map((s) => ({ ...s, category: "DNR" as const })),
+    ];
+    return rows.slice(0, limit);
+  }
+
+  async getGlobalBalances(): Promise<GlobalBalances> {
+    let positiveTotal = 0;
+    let positiveCount = 0;
+    let negativeTotal = 0;
+    let negativeCount = 0;
+    let zeroCount = 0;
+    for (const s of this.data.students) {
+      if (s.accountBalance > 0) {
+        positiveTotal += s.accountBalance;
+        positiveCount += 1;
+      } else if (s.accountBalance < 0) {
+        negativeTotal += Math.abs(s.accountBalance);
+        negativeCount += 1;
+      } else zeroCount += 1;
+    }
+    return { positiveTotal: round2(positiveTotal), positiveCount, negativeTotal: round2(negativeTotal), negativeCount, zeroCount };
+  }
+
+  async getReceivablesByTerm(): Promise<ReceivableByTermRow[]> {
+    const rows = new Map<string, ReceivableByTermRow>();
+    for (const s of this.data.students) {
+      if (s.accountBalance <= 0) continue;
+      const termKey = s.lastCleared ?? "";
+      const row = rows.get(termKey) ?? { termKey, students: 0, positiveBalance: 0 };
+      row.students += 1;
+      row.positiveBalance = round2(row.positiveBalance + s.accountBalance);
+      rows.set(termKey, row);
+    }
+    return [...rows.values()].sort((a, b) => a.termKey.localeCompare(b.termKey));
   }
 
   async getStudentsForPopulation(population: DrillDownPopulation, page: PageRequest): Promise<Page<StudentRow>> {
