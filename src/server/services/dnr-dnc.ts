@@ -4,6 +4,7 @@ import type { DataProvider, DnrDncCategory, DnrDncRow } from "../repositories/ty
 import { getAppStore } from "../store";
 import type { AppStore } from "../store/types";
 import { getCurrentTerms } from "../metadata/terms";
+import { buildSemesterIndex, resolveSemester, semesterLabel, type ResolvedSemester } from "../metadata/semesters";
 import { classificationDisplayName } from "../metadata/classifications";
 import { breakdownCode } from "../metadata/clearance-breakdown";
 import { audit } from "../audit/audit";
@@ -48,7 +49,10 @@ export interface DnrDncTableRow {
   firstName: string;
   accountBalance: number;
   email: string;
+  /** Semester name, e.g. "Fall 2026" — never a raw term code, and never a Traditional/LEAP split. */
   lastCleared: string | null;
+  /** Canonical semester key behind that label; both identifiers of a term share it, so filtering on it merges them. */
+  lastClearedKey: string;
   enrolledCurrentTerm: boolean;
   clearedCurrentSession: boolean;
   pidMasked: string;
@@ -67,7 +71,7 @@ export interface DnrDncView {
   filteredReceivable: number;
   filterOptions: {
     classifications: Array<{ code: string; name: string; count: number }>;
-    lastCleared: Array<{ code: string; count: number }>;
+    lastCleared: Array<{ key: string; label: string; count: number }>;
     balance: { min: number; max: number };
   };
   /** True when the provider's safety cap trimmed the population — shown, never hidden. */
@@ -83,8 +87,9 @@ interface Deps {
 
 const POPULATION_CAP = 5000;
 
-/** Map a source row to its display shape (A-3 masking, A-19 classification). */
-export function toTableRow(s: DnrDncRow): DnrDncTableRow {
+/** Map a source row to its display shape (A-3 masking, A-19 classification, A-16/A-22 semester). */
+export function toTableRow(s: DnrDncRow, index: Map<string, ResolvedSemester>): DnrDncTableRow {
+  const resolved = resolveSemester(s.lastCleared, index);
   return {
     category: s.category,
     classificationCode: breakdownCode(s.classificationCode, s.isIncomingTransfer),
@@ -94,7 +99,8 @@ export function toTableRow(s: DnrDncRow): DnrDncTableRow {
     firstName: s.firstName,
     accountBalance: s.accountBalance,
     email: s.email,
-    lastCleared: s.lastCleared,
+    lastCleared: semesterLabel(s.lastCleared, index),
+    lastClearedKey: resolved.matched ? resolved.semesterKey : (s.lastCleared ?? ""),
     enrolledCurrentTerm: s.enrolledCurrentTerm,
     clearedCurrentSession: s.status === "Cleared",
     pidMasked: maskPid(s.pid),
@@ -107,7 +113,8 @@ export function applyFilter(rows: DnrDncTableRow[], f: DnrDncFilter): DnrDncTabl
     if (f.classification && r.classificationCode !== f.classification) return false;
     if (f.minBalance !== undefined && r.accountBalance < f.minBalance) return false;
     if (f.maxBalance !== undefined && r.accountBalance > f.maxBalance) return false;
-    if (f.lastCleared && (r.lastCleared ?? "") !== f.lastCleared) return false;
+    // Filtering is on the semester, so picking "Fall 2026" covers both of that term's identifiers.
+    if (f.lastCleared && r.lastClearedKey !== f.lastCleared) return false;
     return true;
   });
 }
@@ -136,8 +143,10 @@ export function receivableOf(rows: DnrDncTableRow[]): number {
 
 async function loadPopulation(deps: Deps): Promise<{ rows: DnrDncTableRow[]; capped: boolean; provider: string }> {
   const provider = deps.provider ?? getDataProvider();
-  const raw = await provider.getDnrDncPopulation(POPULATION_CAP);
-  return { rows: raw.map(toTableRow), capped: raw.length >= POPULATION_CAP, provider: provider.name };
+  const store = deps.store ?? getAppStore();
+  const [raw, terms] = await Promise.all([provider.getDnrDncPopulation(POPULATION_CAP), getCurrentTerms(store, provider)]);
+  const index = buildSemesterIndex(terms.all);
+  return { rows: raw.map((r) => toTableRow(r, index)), capped: raw.length >= POPULATION_CAP, provider: provider.name };
 }
 
 export async function getDnrDncView(
@@ -183,21 +192,22 @@ export async function getDnrDncView(
 /** Options are derived from the population itself, so a filter can never select an empty set by mistake. */
 export function buildFilterOptions(rows: DnrDncTableRow[]): DnrDncView["filterOptions"] {
   const classifications = new Map<string, { code: string; name: string; count: number }>();
-  const lastCleared = new Map<string, number>();
+  const lastCleared = new Map<string, { key: string; label: string; count: number }>();
   let min = Number.POSITIVE_INFINITY;
   let max = 0;
   for (const r of rows) {
     const c = classifications.get(r.classificationCode) ?? { code: r.classificationCode, name: r.classification, count: 0 };
     c.count += 1;
     classifications.set(r.classificationCode, c);
-    const lc = r.lastCleared ?? "";
-    lastCleared.set(lc, (lastCleared.get(lc) ?? 0) + 1);
+    const entry = lastCleared.get(r.lastClearedKey) ?? { key: r.lastClearedKey, label: r.lastCleared ?? r.lastClearedKey, count: 0 };
+    entry.count += 1;
+    lastCleared.set(r.lastClearedKey, entry);
     min = Math.min(min, r.accountBalance);
     max = Math.max(max, r.accountBalance);
   }
   return {
     classifications: [...classifications.values()].sort((a, b) => a.name.localeCompare(b.name)),
-    lastCleared: [...lastCleared.entries()].map(([code, count]) => ({ code, count })).sort((a, b) => a.code.localeCompare(b.code)),
+    lastCleared: [...lastCleared.values()].sort((a, b) => a.label.localeCompare(b.label)),
     balance: { min: rows.length ? Math.floor(min) : 0, max: rows.length ? Math.ceil(max) : 0 },
   };
 }

@@ -20,7 +20,14 @@ export const NEVER_CLEARED = "XX0000";
 
 export interface ResolvedSemester {
   matched: true;
+  /** The identifier that matched — Traditional or LEAP. */
   termKey: TermKey;
+  /**
+   * The semester itself, identified by its Traditional key. Both identifiers of a row resolve to the
+   * same value, so a caller that wants one row per semester (rather than one per programme) groups
+   * on this and the LEAP codes fold into their Fall/Spring row.
+   */
+  semesterKey: TermKey;
   semesterName: string;
   academicYear: string;
   /** Which identifier matched: the Traditional or the LEAP name of the row (A-16). */
@@ -71,9 +78,10 @@ export function buildSemesterIndex(terms: TermMetadata[]): Map<string, ResolvedS
       census: t.census,
       financiallyCleared: t.financiallyCleared,
     };
-    if (t.tradName) index.set(key(t.tradName), { ...base, termKey: t.tradName, program: "TRADITIONAL" });
-    // A row carries both names; the LEAP entry must not overwrite the Traditional one.
-    if (t.leapName && key(t.leapName) !== key(t.tradName)) index.set(key(t.leapName), { ...base, termKey: t.leapName, program: "LEAP" });
+    if (t.tradName) index.set(key(t.tradName), { ...base, termKey: t.tradName, semesterKey: t.tradName, program: "TRADITIONAL" });
+    // A row carries both names; the LEAP entry must not overwrite the Traditional one, but it points
+    // at the same semester.
+    if (t.leapName && key(t.leapName) !== key(t.tradName)) index.set(key(t.leapName), { ...base, termKey: t.leapName, semesterKey: t.tradName, program: "LEAP" });
   }
   return index;
 }
@@ -85,11 +93,16 @@ export function resolveSemester(code: string | null | undefined, index: Map<stri
   return hit ?? { matched: false, termKey: raw, reason: "unknown" };
 }
 
-/** Display form for any term code: the semester name when it resolves, the code itself when it does not. */
+/**
+ * Display form for any term code: the semester name when it resolves, the code itself when it does not.
+ * The Traditional/LEAP programme is deliberately NOT shown (J. Wilson, 2026-09-18): a term's two
+ * identifiers name one semester, and LEAP is only a distinction where student classifications are
+ * broken out — where it appears as the classification `AE`, not as a property of the term.
+ */
 export function semesterLabel(code: string | null | undefined, index: Map<string, ResolvedSemester>): string {
   if (!code) return "—";
   const r = resolveSemester(code, index);
-  if (r.matched) return r.program === "LEAP" ? `${r.semesterName} (LEAP)` : r.semesterName;
+  if (r.matched) return r.semesterName;
   return r.reason === "never-cleared" ? "Never cleared" : `${r.termKey} (unknown term)`;
 }
 

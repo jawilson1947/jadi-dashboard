@@ -11,7 +11,8 @@ function row(p: Partial<DnrDncTableRow>): DnrDncTableRow {
     firstName: p.firstName ?? "Avery",
     accountBalance: p.accountBalance ?? 100,
     email: p.email ?? "a@example.edu",
-    lastCleared: p.lastCleared ?? "FA2026",
+    lastCleared: p.lastCleared ?? "Fall 2026",
+    lastClearedKey: p.lastClearedKey ?? p.lastCleared ?? "FA2026",
     enrolledCurrentTerm: p.enrolledCurrentTerm ?? true,
     clearedCurrentSession: p.clearedCurrentSession ?? false,
     pidMasked: "•••••1234",
@@ -20,9 +21,10 @@ function row(p: Partial<DnrDncTableRow>): DnrDncTableRow {
 
 describe("DNR/DNC filters (Spec §8)", () => {
   const rows = [
-    row({ category: "DNC", classificationCode: "FR", accountBalance: 500, lastCleared: "FA2026" }),
-    row({ category: "DNR", classificationCode: "SR", accountBalance: 2500, lastCleared: "SP2026" }),
-    row({ category: "DNC", classificationCode: "TR", accountBalance: 50, lastCleared: "LF2026" }),
+    row({ category: "DNC", classificationCode: "FR", accountBalance: 500, lastCleared: "Fall 2026", lastClearedKey: "FA2026" }),
+    row({ category: "DNR", classificationCode: "SR", accountBalance: 2500, lastCleared: "Spring 2026", lastClearedKey: "SP2026" }),
+    // A LEAP record of the same semester: it must filter with Fall 2026, not as a term of its own.
+    row({ category: "DNC", classificationCode: "TR", accountBalance: 50, lastCleared: "Fall 2026", lastClearedKey: "FA2026" }),
   ];
 
   it("filters by category, classification, balance range and last-cleared value", () => {
@@ -30,7 +32,8 @@ describe("DNR/DNC filters (Spec §8)", () => {
     expect(applyFilter(rows, { classification: "TR" })[0].accountBalance).toBe(50);
     expect(applyFilter(rows, { minBalance: 100 })).toHaveLength(2);
     expect(applyFilter(rows, { minBalance: 100, maxBalance: 1000 })).toHaveLength(1);
-    expect(applyFilter(rows, { lastCleared: "LF2026" })).toHaveLength(1);
+    expect(applyFilter(rows, { lastCleared: "FA2026" })).toHaveLength(2);
+    expect(applyFilter(rows, { lastCleared: "SP2026" })).toHaveLength(1);
     expect(applyFilter(rows, {})).toHaveLength(3);
   });
 

@@ -68,7 +68,7 @@ export default async function DnrDncPage({ searchParams }: { searchParams: Promi
     <>
       <PageHeader
         title="DNR / DNC Analysis"
-        description={`${view.term.label} · current ${view.term.currentKeys.join(" / ")} · previous ${view.term.previousKeys.join(" / ")} · live read at ${formatDateTime(view.source.readAt, tz)}`}
+        description={`Current semester ${view.term.label}; DNR looks at the previous one · live read at ${formatDateTime(view.source.readAt, tz)}`}
         actions={
           <span className="flex items-center gap-3">
             {canExport ? <ExportCsvButton query={query.toString()} sort={q.sort} direction={q.direction} rowCount={view.totalRows} /> : null}
@@ -139,9 +139,9 @@ export default async function DnrDncPage({ searchParams }: { searchParams: Promi
               receivable total never adds the same balance twice.
             </p>
             <p>
-              <strong>DNC</strong>: last cleared value is a current-term code ({view.term.currentKeys.join(" or ")}) and the current-session clearance flag is 0.{" "}
-              <strong>DNR</strong>: last cleared value is a previous-term code ({view.term.previousKeys.join(" or ")}), the flag is 1, and the student is <em>not</em> present in current
-              enrollment — that absence is verified against the enrollment view rather than inferred from the flag.
+              <strong>DNC</strong>: last cleared in the current semester ({view.term.label}) with the current-session clearance flag still 0.{" "}
+              <strong>DNR</strong>: last cleared in the previous semester, the flag is 1, and the student is <em>not</em> present in current enrollment — that absence is verified against
+              the enrollment view rather than inferred from the flag. A semester means both its Traditional and LEAP identifiers; the two are never counted separately here.
             </p>
             <p>
               Both require a debit balance: money owed is the only indicator of interest (A-1, 2026-09-17). The unfiltered populations without that condition are larger

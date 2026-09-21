@@ -52,8 +52,8 @@ export function DnrDncFilters({
         <select id="f-last" name="lastCleared" defaultValue={current.lastCleared ?? ""} className={field}>
           <option value="">All</option>
           {options.lastCleared.map((l) => (
-            <option key={l.code || "blank"} value={l.code}>
-              {l.code || "(blank)"} ({formatCount(l.count)})
+            <option key={l.key || "blank"} value={l.key}>
+              {l.label || "(blank)"} ({formatCount(l.count)})
             </option>
           ))}
         </select>

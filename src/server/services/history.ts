@@ -137,7 +137,8 @@ export interface ReceivablesView {
 }
 
 /**
- * §9.3: group positive balances by the semester each student's LastCleared points at.
+ * §9.3: group debit balances by the semester each student's LastCleared points at. Traditional and
+ * LEAP identifiers fold into one row per semester (A-16: a tblOUSA row carries both names).
  * The three lines below the table exist so that semesters + excluded + unmatched always equals the
  * global receivable figure — a chart that does not reconcile with the headline number is how people
  * stop trusting a dashboard.
@@ -163,8 +164,10 @@ export function buildReceivables(rows: ReceivableByTermRow[], index: Map<string,
       if (!excluded.terms.includes(r.termKey)) excluded.terms.push(r.termKey);
       continue;
     }
-    const key = groupBy === "schoolYear" ? resolved.academicYear : resolved.termKey;
-    const label = groupBy === "schoolYear" ? resolved.academicYear : resolved.program === "LEAP" ? `${resolved.semesterName} (LEAP)` : resolved.semesterName;
+    // One row per semester: the Traditional and LEAP identifiers of a term are the same semester, so
+    // their balances are added together instead of appearing as two lines (2026-09-18, J. Wilson).
+    const key = groupBy === "schoolYear" ? resolved.academicYear : resolved.semesterKey;
+    const label = groupBy === "schoolYear" ? resolved.academicYear : resolved.semesterName;
     const row = grouped.get(key) ?? { key, label, academicYear: resolved.academicYear, students: 0, positiveBalance: 0, isCurrent: false };
     row.students += r.students;
     row.positiveBalance = round2(row.positiveBalance + r.positiveBalance);

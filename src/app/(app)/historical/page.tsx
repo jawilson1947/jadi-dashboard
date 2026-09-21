@@ -55,15 +55,12 @@ export default async function HistoricalPage({ searchParams }: { searchParams: P
 }
 
 /**
- * Axis form of a semester name: "Fall 2015" → "Fall 15", "Fall 2025 (LEAP)" → "Fall 25 LEAP".
- * Two dozen names share one axis, so the century digits are dropped — the year is still unambiguous
- * and the season, which is what distinguishes adjacent points, stays spelled out.
+ * Axis form of a semester name: "Fall 2015" → "Fall 15". Two dozen names share one axis, so the
+ * century digits are dropped — the year is still unambiguous and the season, which is what
+ * distinguishes adjacent points, stays spelled out.
  */
 function shortSemester(label: string): string {
-  return label
-    .replace(/\b(\d{2})(\d{2})\b/, "$2")
-    .replace(/\s*\(LEAP\)/, " LEAP")
-    .trim();
+  return label.replace(/\b(\d{2})(\d{2})\b/, "$2").trim();
 }
 
 /** The two full-record trends (census, financially cleared) — the whole history, not the picked range. */

@@ -34,7 +34,9 @@ describe("semester resolver (A-22)", () => {
     expect(!unknown.matched && unknown.reason).toBe("unknown");
     expect(semesterLabel("ZZ9999", index)).toBe("ZZ9999 (unknown term)");
     expect(semesterLabel(NEVER_CLEARED, index)).toBe("Never cleared");
-    expect(semesterLabel("LF2025", index)).toBe("Fall 2025 (LEAP)");
+    // LEAP is not a distinction in a semester label (2026-09-18): both identifiers name one semester.
+    expect(semesterLabel("LF2025", index)).toBe("Fall 2025");
+    expect(semesterLabel("FA2025", index)).toBe("Fall 2025");
   });
 
   it("recognises summer codes for the omission rule (A-23)", () => {

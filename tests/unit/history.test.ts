@@ -70,9 +70,16 @@ describe("receivables by semester (Spec §9.3; A-22, A-23)", () => {
     { termKey: "ZZ9999", students: 1, positiveBalance: 100 },
   ];
 
-  it("groups matched terms, buckets summer and unmatched codes, and still adds up", () => {
+  it("merges the Traditional and LEAP identifiers of a term into one semester row", () => {
     const view = buildReceivables(rows, index, "semester");
-    expect(view.rows.map((r) => r.label)).toEqual(["Fall 2025", "Fall 2025 (LEAP)"]);
+    expect(view.rows.map((r) => r.label)).toEqual(["Fall 2025"]);
+    expect(view.rows[0].positiveBalance).toBe(5800);
+    expect(view.rows[0].students).toBe(12);
+    expect(JSON.stringify(view.rows)).not.toContain("LEAP");
+  });
+
+  it("buckets summer and unmatched codes, and still adds up", () => {
+    const view = buildReceivables(rows, index, "semester");
     expect(view.excluded).toMatchObject({ students: 3, positiveBalance: 300, terms: ["SU2025"] });
     expect(view.neverCleared).toMatchObject({ students: 5, positiveBalance: 1200 });
     expect(view.unknown).toMatchObject({ students: 1, positiveBalance: 100, terms: ["ZZ9999"] });
