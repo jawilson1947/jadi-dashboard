@@ -125,16 +125,29 @@ function Stat({ label, value, note }: { label: string; value: string; note: stri
   );
 }
 
-/** §7.1 — daily counts with a running total; each day links to the students cleared that day. */
+/**
+ * §7.1 — daily counts with a running total; each day links to the students cleared that day.
+ *
+ * Days with no clearance actions are omitted from BOTH the chart and the table: over a full
+ * sprint most of the zero days are weekends and they crowded out the days that carry activity.
+ * Two consequences a reader should know, and the caption says so:
+ *   - the x-axis is no longer evenly spaced in time — it is the sequence of days that had
+ *     activity, so a wide gap in the calendar looks the same as a one-day gap;
+ *   - "Total to date" still comes from the full window (`cumulative` is computed upstream over
+ *     every day), so the running total stays truthful and its jumps show where days were skipped.
+ * Today is always kept even at zero, so the dashed rule still has a bar to sit on.
+ */
 function ByDate({ rows, canDrillDown }: { rows: SprintDayRow[]; canDrillDown: boolean }) {
   const active = rows.filter((r) => !r.isFuture);
+  const shown = rows.filter((r) => r.cleared > 0 || r.isToday);
+  const omitted = rows.length - shown.length;
   return (
     <section className="card space-y-3">
       <h2 className="text-sm font-medium text-ink-2">Cleared by date</h2>
       <ColumnChart
-        points={rows.map((r) => ({ label: formatIsoDate(r.date, "short").replace(/\/\d{2,4}$/, ""), value: r.cleared, muted: r.isFuture, marked: r.isToday }))}
+        points={shown.map((r) => ({ label: formatIsoDate(r.date, "short").replace(/\/\d{2,4}$/, ""), value: r.cleared, muted: r.isFuture, marked: r.isToday }))}
         title="Students financially cleared per day"
-        description={`${formatCount(active.reduce((s, r) => s + r.cleared, 0))} students cleared across ${formatCount(active.length)} elapsed days of the sprint. The dashed rule marks today; the table below carries the same numbers.`}
+        description={`${formatCount(active.reduce((s, r) => s + r.cleared, 0))} students cleared across ${formatCount(active.length)} elapsed days of the sprint.${omitted > 0 ? ` ${formatCount(omitted)} day${omitted === 1 ? "" : "s"} with no clearance actions are omitted, so the axis is not evenly spaced in time.` : ""} The dashed rule marks today; the table below carries the same numbers.`}
       />
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -149,7 +162,7 @@ function ByDate({ rows, canDrillDown }: { rows: SprintDayRow[]; canDrillDown: bo
             </tr>
           </thead>
           <tbody>
-            {rows.filter((r) => !r.isFuture || r.cleared > 0).map((r) => (
+            {shown.map((r) => (
               <tr key={r.date} className={`border-t border-border ${r.isToday ? "bg-brand-track/40" : ""}`}>
                 <td className="px-3 py-1.5 whitespace-nowrap">
                   {canDrillDown && r.cleared > 0 ? (
@@ -166,7 +179,7 @@ function ByDate({ rows, canDrillDown }: { rows: SprintDayRow[]; canDrillDown: bo
                 <td className="px-3 py-1.5 text-right tabular text-ink-2">{formatCount(r.cumulative)}</td>
               </tr>
             ))}
-            {rows.length === 0 ? (
+            {shown.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-3 py-8 text-center text-ink-3">
                   No clearance actions in this window yet.
@@ -176,6 +189,12 @@ function ByDate({ rows, canDrillDown }: { rows: SprintDayRow[]; canDrillDown: bo
           </tbody>
         </table>
       </div>
+      {omitted > 0 ? (
+        <p className="text-xs text-ink-3">
+          {formatCount(omitted)} day{omitted === 1 ? "" : "s"} of the sprint window had no clearance actions and {omitted === 1 ? "is" : "are"} not
+          listed. “Total to date” is still calculated across every day of the window.
+        </p>
+      ) : null}
     </section>
   );
 }

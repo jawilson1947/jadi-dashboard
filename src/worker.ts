@@ -15,6 +15,7 @@ import { getDataProvider } from "./server/repositories";
 import { getAppStore } from "./server/store";
 import type { JobKey } from "./server/store/types";
 import { ensureJobsSeeded, runJob, workerId } from "./server/jobs/runner";
+import { connectionHost } from "./server/db/target";
 
 const log = (msg: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ level: "info", ts: new Date().toISOString(), worker: workerId(), msg, ...extra }));
 
@@ -23,7 +24,16 @@ async function main() {
   const store = getAppStore();
   const provider = getDataProvider();
   await ensureJobsSeeded(store);
-  log("worker started", { provider: provider.name, store: cfg.APP_STORE, timezone: cfg.APP_TIMEZONE });
+  log("worker started", {
+    provider: provider.name,
+    store: cfg.APP_STORE,
+    timezone: cfg.APP_TIMEZONE,
+    // Which database this worker writes snapshots from and to. Hosts only — never the
+    // connection strings (docs/TARGET-SWITCHING-PLAN.md).
+    target: cfg.DB_TARGET,
+    ousaHost: connectionHost(cfg.OUSADB_CONNECTION_STRING),
+    dashHost: connectionHost(cfg.DASH_CONNECTION_STRING),
+  });
 
   // Startup catch-up: populate any family that has never succeeded.
   for (const job of await store.listJobs()) {

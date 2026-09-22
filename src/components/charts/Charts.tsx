@@ -13,8 +13,10 @@ const AXIS = "var(--color-ink-3, #6b7280)";
 const GRID = "var(--color-border, #d8dee6)";
 
 /**
- * Value labels sit on every plotted point. Where points are dense the label rotates to vertical
- * rather than being dropped or overlapped — a number that cannot be read is worse than a tick mark.
+ * Every plotted bar carries its value. Where bars are narrow the label rotates to vertical rather
+ * than being dropped or allowed to overlap — a number that cannot be read is worse than none.
+ * CATEGORY labels are a separate matter: those are thinned to a stride that fits, because the
+ * axis only has to let a reader locate themselves, and the companion table carries every row.
  */
 const LABEL = "var(--color-ink-2, #3f4754)";
 
@@ -38,24 +40,49 @@ export interface ColumnPoint {
   marked?: boolean;
 }
 
-/** Daily clearance counts (Spec §7.1). Bars are drawn edge-to-edge; only a few labels are shown. */
+/**
+ * Daily clearance counts (Spec §7.1).
+ *
+ * Bars are drawn edge-to-edge. Callers drop the zero days (see ByDate in the Clearance Sprint
+ * page), which keeps the column count low enough that:
+ *   - every bar carries its count, horizontally on wide bars and rotated upright on narrow ones;
+ *   - category labels are thinned to a stride that fits, always keeping the first bar, the last
+ *     bar and today — the points a reader orients by.
+ * The table underneath carries every date and every count.
+ */
 export function ColumnChart({ points, title, description, height = 230, valueLabel = "students cleared" }: { points: ColumnPoint[]; title: string; description: string; height?: number; valueLabel?: string }) {
   if (points.length === 0) return null;
   const width = 720;
-  // Extra headroom at the top: every bar carries its value, rotated upright where bars are narrow.
-  // Bottom gutter holds an upright category label for EVERY bar: a value with no period attached
-  // tells the reader nothing, so no category is skipped.
-  const padding = { top: 30, right: 8, bottom: 56, left: 44 };
+  // Bottom gutter holds the rotated category labels; top gutter holds a value label above the
+  // tallest bar.
+  const padding = { top: 34, right: 8, bottom: 56, left: 44 };
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
   const max = niceMax(Math.max(...points.map((p) => p.value)));
   const barW = plotW / points.length;
   const ticks = [0, max / 2, max];
+  const yAxis = padding.top + plotH;
+
+  // Bars wide enough for a horizontal label underneath.
   const wideBars = barW >= 44;
+  const lastIndex = points.length - 1;
+  const markedIndex = points.findIndex((p) => p.marked);
+
+  // Thin the category labels to roughly one every 48px, so they never collide however long the
+  // sprint is. The ends and today are always kept — they are the points a reader orients by.
+  const stride = Math.max(1, Math.ceil(points.length / Math.max(1, Math.floor(plotW / 48))));
+  const showCategory = (i: number) => wideBars || i === 0 || i === lastIndex || i === markedIndex || i % stride === 0;
+
+  // Every bar shows its count. Nothing is dropped: below ~26px the label rotates upright into the
+  // headroom instead, which is why `padding.top` is generous.
+  const showValue = (p: ColumnPoint) => p.value > 0;
 
   return (
     <figure className="m-0">
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="img" aria-label={`${title}. ${description}`} preserveAspectRatio="none">
+      {/* No preserveAspectRatio override: the default (xMidYMid meet) scales the viewBox
+          uniformly. "none" stretches the drawing to the container's width independently of its
+          height, which distorts every glyph — that is what made the labels look garbled. */}
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" role="img" aria-label={`${title}. ${description}`}>
         <title>{title}</title>
         <desc>{description}</desc>
         {ticks.map((t) => {
@@ -73,41 +100,50 @@ export function ColumnChart({ points, title, description, height = 230, valueLab
           const h = max > 0 ? (p.value / max) * plotH : 0;
           const x = padding.left + i * barW;
           const y = padding.top + plotH - h;
+          const cx = x + barW / 2;
+          // A 2px surface gap between neighbouring bars, down to a 1px bar at the densest.
+          const gap = Math.min(2, barW * 0.2);
           return (
             <g key={p.label}>
               <rect
-                x={x + Math.min(1, barW * 0.1)}
+                x={x + gap / 2}
                 y={y}
-                width={Math.max(1, barW - Math.min(2, barW * 0.2))}
+                width={Math.max(1, barW - gap)}
                 height={Math.max(p.value > 0 ? 1 : 0, h)}
                 fill={p.muted ? GRID : "var(--color-brand, #2a78d6)"}
                 opacity={p.muted ? 0.6 : 1}
               />
-              {p.marked ? <line x1={x + barW / 2} x2={x + barW / 2} y1={padding.top} y2={padding.top + plotH} stroke={AXIS} strokeDasharray="3 3" strokeWidth={1} /> : null}
-              {p.value > 0 ? (
+              {p.marked ? <line x1={cx} x2={cx} y1={padding.top} y2={yAxis} stroke={AXIS} strokeDasharray="3 3" strokeWidth={1} /> : null}
+              {showValue(p) ? (
                 barW >= 26 ? (
-                  <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={9} fill={LABEL}>
+                  <text x={cx} y={y - 4} textAnchor="middle" fontSize={9} fill={LABEL}>
                     {labelText(p.value)}
                   </text>
                 ) : (
-                  <text x={x + barW / 2} y={y - 4} textAnchor="start" fontSize={9} fill={LABEL} transform={`rotate(-90 ${x + barW / 2} ${y - 4})`}>
+                  // rotate(-90) with textAnchor="start" runs the glyphs upward from the pivot,
+                  // so the label sits in the headroom above the bar rather than over it.
+                  <text x={cx} y={y - 5} textAnchor="start" fontSize={9} fill={LABEL} transform={`rotate(-90 ${cx} ${y - 5})`}>
                     {labelText(p.value)}
                   </text>
                 )
               ) : null}
-              {wideBars ? (
-                <text x={x + barW / 2} y={height - 40} textAnchor="middle" fontSize={10} fill={AXIS}>
-                  {p.label}
-                </text>
-              ) : (
-                <text x={x + barW / 2} y={height - 48} textAnchor="end" fontSize={9} fill={AXIS} transform={`rotate(-90 ${x + barW / 2} ${height - 48})`}>
-                  {p.label}
-                </text>
-              )}
+              {showCategory(i) ? (
+                wideBars ? (
+                  <text x={cx} y={yAxis + 16} textAnchor="middle" fontSize={10} fill={AXIS}>
+                    {p.label}
+                  </text>
+                ) : (
+                  // textAnchor="end" runs the glyphs downward from the pivot into the gutter,
+                  // reading bottom-to-top and ending just under the axis.
+                  <text x={cx} y={yAxis + 8} textAnchor="end" fontSize={9} fill={AXIS} transform={`rotate(-90 ${cx} ${yAxis + 8})`}>
+                    {p.label}
+                  </text>
+                )
+              ) : null}
             </g>
           );
         })}
-        <line x1={padding.left} x2={width - padding.right} y1={padding.top + plotH} y2={padding.top + plotH} stroke={AXIS} strokeWidth={1} />
+        <line x1={padding.left} x2={width - padding.right} y1={yAxis} y2={yAxis} stroke={AXIS} strokeWidth={1} />
       </svg>
       <figcaption className="sr-only">
         {title} — {description} ({valueLabel})

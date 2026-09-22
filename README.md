@@ -38,6 +38,23 @@ Use the development sign-in as `admin`, `operator`, `viewer`, or `viewer-plus` (
 explicit `student.view` grant) to see how modules and drill-downs change by role. Real accounts use
 username + password (Administration → Users); see `docs/USER-MANAGEMENT-PLAN.md`.
 
+### Choosing the database target
+
+Staging and production differ only in the SQL Server named in the two connection strings, so
+`.env.local` holds both pairs (`*_STAGING` and `*_PRODUCTION`) and the launch command picks one.
+No file is edited to move between them. See `docs/TARGET-SWITCHING-PLAN.md`.
+
+```bash
+npm run dev            # staging (the default — a forgotten flag goes somewhere harmless)
+npm run dev:prod       # production
+npm run worker:prod    # and :prod variants of db:migrate, bootstrap:admin, snapshot:once, reset:credentials
+npm run verify:target  # connects and prints @@SERVERNAME for each — "what am I actually pointed at?"
+```
+
+An unrecognised `DB_TARGET` is rejected rather than silently defaulting, and `APP_ENV=production`
+with a non-production target refuses to start. Startup logs the target and the two hosts; never
+the connection strings.
+
 ```bash
 npm run worker      # scheduled snapshot jobs (separate terminal); startup catch-up populates empty families
 npm run typecheck   # tsc --noEmit

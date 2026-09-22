@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TARGETS, connectionHost, missingConnectionMessage, resolveTarget } from "./target";
 
 /**
  * Environment configuration, validated once at startup (Spec §16 environment-based config).
@@ -47,6 +48,11 @@ const envSchema = z.object({
   WORKER_ID: z.string().optional(),
   /** Source database (ousadb) read-only connection. Only used by the mssql provider. */
   OUSADB_CONNECTION_STRING: z.string().optional(),
+  /** Which SQL Server the two connection strings point at (docs/TARGET-SWITCHING-PLAN.md).
+   *  Set by the npm scripts (dev:prod, worker:prod, ...); defaults to staging so that a
+   *  forgotten flag goes somewhere harmless. resolveTarget() has already run by the time this
+   *  is parsed, so the value here is the resolved one. */
+  DB_TARGET: z.enum(TARGETS).default("staging"),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -55,6 +61,10 @@ let cached: AppConfig | null = null;
 
 export function getConfig(): AppConfig {
   if (cached) return cached;
+  // Promote the target-specific connection strings into the generic names BEFORE validation,
+  // so the schema sees one consistent pair whichever target was chosen.
+  const resolved = resolveTarget(process.env);
+
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     throw new Error(`Invalid environment configuration: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
@@ -67,12 +77,36 @@ export function getConfig(): AppConfig {
   }
   parsed.data.DASH_CONNECTION_STRING ??= parsed.data.DATABASE_URL ?? parsed.data.JADI_DASH_CONNECTION_STRING;
   if (parsed.data.APP_STORE === "mssql" && !parsed.data.DASH_CONNECTION_STRING) {
-    throw new Error("DASH_CONNECTION_STRING is required when APP_STORE=mssql.");
+    throw new Error(missingConnectionMessage("DASH_CONNECTION_STRING", resolved.target, "APP_STORE=mssql"));
   }
   if (parsed.data.DATA_PROVIDER === "mssql" && !parsed.data.OUSADB_CONNECTION_STRING) {
-    throw new Error("OUSADB_CONNECTION_STRING is required when DATA_PROVIDER=mssql.");
+    throw new Error(missingConnectionMessage("OUSADB_CONNECTION_STRING", resolved.target, "DATA_PROVIDER=mssql"));
+  }
+  // A production deployment pointed at staging (or the reverse) means one of the two was changed
+  // and the other forgotten. There is no legitimate use for the combination.
+  if (parsed.data.APP_ENV === "production" && parsed.data.DB_TARGET !== "production") {
+    throw new Error(
+      `APP_ENV=production requires DB_TARGET=production (currently "${parsed.data.DB_TARGET}"). ` +
+        "Refusing to run a production deployment against a non-production database.",
+    );
   }
   cached = parsed.data;
+
+  // One line, hosts only — never a connection string. This is the answer to "which database am
+  // I actually pointed at", which is otherwise only discoverable from the server side.
+  console.log(
+    JSON.stringify({
+      level: "info",
+      msg: "config resolved",
+      target: cached.DB_TARGET,
+      appEnv: cached.APP_ENV,
+      provider: cached.DATA_PROVIDER,
+      store: cached.APP_STORE,
+      ousaHost: connectionHost(cached.OUSADB_CONNECTION_STRING),
+      dashHost: connectionHost(cached.DASH_CONNECTION_STRING),
+    }),
+  );
+
   return cached;
 }
 

@@ -85,9 +85,9 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   return (
     <aside ref={asideRef} aria-label="Primary" data-collapsed={collapsed ? "true" : "false"} className={`${collapsed ? "w-14" : "w-60"} shrink-0 border-r border-border bg-surface-1 flex flex-col`}>
       <div className={`flex items-center border-b border-border ${collapsed ? "justify-center px-2 py-3" : "gap-2 px-4 py-4"}`}>
-        <Link href="/dashboard" className="flex items-center gap-2 min-w-0" title={collapsed ? "JADI Billing — dashboard" : undefined}>
+        <Link href="/dashboard" className="flex items-center gap-2 min-w-0" title={collapsed ? "JADI Dashboard" : undefined}>
           <span aria-hidden className="h-7 w-7 rounded-md bg-brand shrink-0" />
-          {collapsed ? <span className="sr-only">JADI Billing</span> : <span className="font-semibold leading-tight truncate">JADI Billing</span>}
+          {collapsed ? <span className="sr-only">JADI Dashboard</span> : <span className="font-semibold leading-tight truncate">JADI Dashboard</span>}
         </Link>
         {collapsed ? null : (
           <button type="button" onClick={toggle} aria-expanded aria-controls="primary-nav" title="Collapse sidebar (press [ )" className="ml-auto rounded-md border border-border px-2 py-1 text-xs text-ink-2 hover:bg-surface-2">
