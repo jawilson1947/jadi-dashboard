@@ -21,7 +21,7 @@ export function PrintHeader({ title, subtitle, semester, capturedAt, printedBy, 
       <header className={`print-header ${scoped ? "print-scope-header" : "print-only"}`} aria-hidden>
         <div className="flex items-baseline justify-between gap-4 border-b-2 border-black pb-2 mb-3">
           <div>
-            <div className="text-xs uppercase tracking-wide">JADI Billing Dashboard</div>
+            <div className="text-xs uppercase tracking-wide">JADI Dashboard</div>
             <h1 className="text-xl font-semibold leading-tight">{title}</h1>
             {subtitle ? <div className="text-sm">{subtitle}</div> : null}
           </div>
@@ -34,7 +34,7 @@ export function PrintHeader({ title, subtitle, semester, capturedAt, printedBy, 
         </div>
       </header>
       <footer className={`print-footer ${scoped ? "print-scope-footer" : "print-only"}`} aria-hidden>
-        JADI Billing Dashboard · {title} · analysis only, no writes to Jenzabar · contains student financial data — handle per institutional policy
+        JADI Dashboard · {title} · analysis only, no writes to Jenzabar · contains student financial data — handle per institutional policy
       </footer>
     </>
   );

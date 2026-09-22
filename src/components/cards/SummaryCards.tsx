@@ -14,7 +14,7 @@ export function ReceivableCard({ metric, canDrillDown, timeZone }: { metric: Cur
       error={metric.error}
       capturedAt={metric.capturedAt}
       timeZone={timeZone}
-      footer={v ? `Positive tblStudent.AccountBalance where LastCleared ∈ {${v.terms.join(", ")}}` : undefined}
+      footer={v ? `Debit balances where LastCleared ∈ {${v.terms.join(", ")}}` : undefined}
     >
       {v ? (
         <>

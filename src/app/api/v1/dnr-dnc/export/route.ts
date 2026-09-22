@@ -4,13 +4,14 @@ import { requirePermission } from "@/server/authz/permissions";
 import { exportDnrDnc } from "@/server/services/dnr-dnc";
 import { csvHeaders } from "@/server/services/export";
 import { handle } from "@/server/api/respond";
+import { optionalFilter } from "@/server/api/query";
 
 const bodySchema = z.object({
-  category: z.enum(["DNR", "DNC"]).optional(),
-  classification: z.string().max(10).optional(),
-  lastCleared: z.string().max(50).optional(),
-  minBalance: z.coerce.number().min(0).optional(),
-  maxBalance: z.coerce.number().min(0).optional(),
+  category: optionalFilter(z.enum(["DNR", "DNC"])),
+  classification: optionalFilter(z.string().max(10)),
+  lastCleared: optionalFilter(z.string().max(50)),
+  minBalance: optionalFilter(z.coerce.number().min(0)),
+  maxBalance: optionalFilter(z.coerce.number().min(0)),
   sort: z.enum(["default", "category", "classification", "lastName", "firstName", "accountBalance", "idnumber", "lastCleared"]).default("default"),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });

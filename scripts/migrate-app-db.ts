@@ -9,9 +9,13 @@ import "./load-env";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import sql from "mssql";
+import { connectionHost, resolveTarget } from "../src/server/db/target";
 
 async function main() {
+  // Promote DASH_CONNECTION_STRING_<TARGET> into the generic name, exactly as the app does (docs/TARGET-SWITCHING-PLAN.md).
+  const { target } = resolveTarget(process.env);
   const cs = process.env.DASH_CONNECTION_STRING ?? process.env.DATABASE_URL ?? process.env.JADI_DASH_CONNECTION_STRING;
+  if (cs) console.log(`target=${target} dashHost=${connectionHost(cs)}`);
   if (!cs) {
     throw new Error(
       "DASH_CONNECTION_STRING is not set. Add it to .env.local (or set DATABASE_URL / JADI_DASH_CONNECTION_STRING, " +

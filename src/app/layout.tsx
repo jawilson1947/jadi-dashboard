@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "JADI Billing Dashboard", template: "%s · JADI Billing Dashboard" },
+  title: { default: "JADI Dashboard", template: "%s · JADI Dashboard" },
   description: "Student billing, enrollment, and financial-clearance analysis",
 };
 

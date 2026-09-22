@@ -15,7 +15,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         <div className="flex items-center gap-3 mb-6">
           <div aria-hidden className="h-10 w-10 rounded-lg bg-brand" />
           <div>
-            <h1 className="text-xl font-semibold leading-tight">JADI Billing Dashboard</h1>
+            <h1 className="text-xl font-semibold leading-tight">JADI Dashboard</h1>
             <p className="text-sm text-ink-2">Student billing analysis</p>
           </div>
         </div>

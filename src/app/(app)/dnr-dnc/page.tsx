@@ -11,16 +11,18 @@ import { PrintHeader } from "@/components/print/PrintHeader";
 import { DataTable, type Column } from "@/components/tables/DataTable";
 import { DnrDncFilters } from "@/components/dnr-dnc/DnrDncFilters";
 import { ExportCsvButton } from "@/components/dnr-dnc/ExportCsvButton";
+import { optionalFilter } from "@/server/api/query";
 
 export const metadata = { title: "DNR / DNC Analysis" };
 export const dynamic = "force-dynamic";
 
+// The filter bar is a GET form: an untouched field arrives as "" (e.g. ?category=), which must mean "no filter".
 const paramsSchema = z.object({
-  category: z.enum(["DNR", "DNC"]).optional(),
-  classification: z.string().max(10).optional(),
-  lastCleared: z.string().max(50).optional(),
-  minBalance: z.coerce.number().min(0).optional(),
-  maxBalance: z.coerce.number().min(0).optional(),
+  category: optionalFilter(z.enum(["DNR", "DNC"])),
+  classification: optionalFilter(z.string().max(10)),
+  lastCleared: optionalFilter(z.string().max(50)),
+  minBalance: optionalFilter(z.coerce.number().min(0)),
+  maxBalance: optionalFilter(z.coerce.number().min(0)),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(10).max(200).default(50),
   sort: z.enum(["default", "category", "classification", "lastName", "firstName", "accountBalance", "idnumber", "lastCleared"]).default("default"),
