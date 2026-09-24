@@ -1,0 +1,113 @@
+Dim CreditsNeeded As Boolean
+Dim DebitsNeeded As Boolean
+Dim debits(20, 1) As String
+Dim credits(20, 1) As String
+Dim dCount As Integer
+Dim cCount As Integer
+
+
+Dim dcd As String, sql As String, isql As String
+'   sql = "select ID_NUM,TRANS_DTE,abs(TRANS_AMT) AS TRANS_AMT,TRANS_DESC,SOURCE_CDE " & _
+'   "from [jadi].[dbo].[trans_hist] T0 " & _
+'     "where ID_NUM = " & idnumber & _
+'   " and SUBSID_CDE = 'AR' " & _
+'   " and ((CHG_TRM_TRAN_HIST IN ('" & ExTradTrmCde & "'," & "'" & ExLeapTrmCde & "')) and (CHG_YR_TRAN_HIST=" & CStr(ExYrCde) & ")) " & _
+'   "  and (((source_cde in ('@F','@C')) or ((SUBSID_TRANS_STS = 'S') and TRANS_DESC like '%*%')))"
+' get current transactions
+sql = "Sp_GetFCItems " & idnumber
+   With cmd
+     .CommandText = sql
+   Set rs = .Execute
+   End With
+    Credit_Row = 8
+     Debit_Row = 2
+     If Not rs.EOF Then
+   While Not rs.EOF
+      If rs("SOURCE_CDE") = "@F" Or InStr(1, rs("TRANS_DESC"), "*") > 0 Then
+         cell = "B" & CStr(Credit_Row)
+         Sheet1.Range(cell).Value = rs("TRANS_DESC").Value
+         cell = "I" & CStr(Credit_Row)
+         Sheet1.Range(cell).Value = rs("TRANS_AMT").Value
+         Credit_Row = Credit_Row + 1
+      ElseIf rs("SOURCE_CDE") = "@C" Then
+        cell = "B" & CStr(Debit_Row)
+        Sheet4.Range(cell).Value = rs("TRANS_DESC").Value
+        cell = "C" & CStr(Debit_Row)
+        Sheet4.Range(cell).Value = rs("TRANS_AMT").Value
+        Debit_Row = Debit_Row + 1
+        End If
+        rs.MoveNext
+     Wend
+   End If ' not rs.eof ' nothing found jenzabar trans_hist table
+   ' check to see if drop classes date is past
+    CreditsNeeded = (Credit_Row = 8)
+    DebitsNeeded = (Debit_Row = 2)
+    cCount = 0
+    dCount = 0
+   If CreditsNeeded Or DebitsNeeded Then 'didn't find debits or credits check to see if backup table is activated
+    If DropClassesDate <= Format(Now(), "yyyymmdd") Then ' get data from back up table
+        sql = "select ID_NUM,TRANS_DTE,abs(TRANS_AMT) AS TRANS_AMT,TRANS_DESC,SOURCE_CDE " & _
+        "from ousadb.dbo.tblFCA_TRANS_HIST where ID_NUM = " & idnumber & _
+         " and ((source_cde in ('@F','@C')) " & _
+         "   or (TRANS_DESC like '*%'))"
+         With cmd
+            .CommandText = sql
+            Set rs = .Execute
+        End With
+        If Not rs.EOF Then ' found transactions in backup table
+           While Not rs.EOF
+             If rs("SOURCE_CDE") = "@F" Or InStr(1, rs("TRANS_DESC"), "*") > 0 Then
+               If CreditsNeeded Then
+                credits(tCount, 0) = rs("TRANS_DESC").Value
+                credits(tCount, 1) = rs("TRANS_AMT").Value
+                cCount = cCount + 1
+              End If
+             ElseIf rs("SOURCE_CDE") = "@C" Then
+               If DebitsNeeded Then
+                 debits(dCount, 0) = rs("TRANS_DESC").Value
+                 debits(dCount, 1) = rs("TRANS_AMT").Value
+                dCount = dCount + 1
+              End If
+            End If
+             rs.MoveNext
+          Wend
+          If CreditsNeeded And cCount > 0 Then
+           For i = 0 To cCount - 1
+                cell = "B" & CStr(Credit_Row + i)
+               Sheet1.Range(cell).Value = credits(i, 0)
+                cell = "I" & CStr(Credit_Row + i)
+                Sheet1.Range(cell).Value = credits(i, 1)
+            Next
+          End If
+          If DebitsNeeded And dCount > 0 Then
+           For i = 0 To dCount - 1
+             cell = "B" & CStr(Debit_Row + i)
+                Sheet4.Range(cell).Value = debits(i, 0)
+                cell = "C" & CStr(Debit_Row + i)
+                Sheet4.Range(cell).Value = debits(i, 1)
+            Next
+          End If
+          dcd = Mid(DropClassesDate, 5, 2) & "/" & Right(DropClassesDate, 2) & "/" & Left(DropClassesDate, 4)
+          Sheet1.Range("B34:B34").Value = "Classes Dropped on " & dcd & ", Data retrieved from backup files."
+        Else ' no transactions found in backup table
+           If CreditsNeeded And DebitsNeeded Then
+              MsgBox ("No Information Found for: " & idnumber)
+           End If
+        End If
+     Else ' classes not dropped as yet, therefore backup table not activated
+       If Credit_Row = 8 And Debit_Row = 2 Then
+            MsgBox ("No registration charges or credits Found for: " & Student & " for " & SemesterName)
+       ElseIf Debit_Row = 2 Then
+                MsgBox ("No registration charges Found for: " & Student & " for " & SemesterName)
+       ElseIf Credit_Row = 8 Then
+                       MsgBox ("No registration  credits Found for: " & Student & " for " & SemesterName)
+
+       End If
+   End If
+
+End If
+
+Exit Sub
+MyErrorHandler:
+   MsgBox ("Error Encountered: !** " & CStr(Err.Number) + ": " + Err.Description)
+End Sub

@@ -1,0 +1,317 @@
+Dim CreditsNeeded As Boolean
+Dim DebitsNeeded As Boolean
+Dim debits(20, 1) As String
+Dim credits(20, 1) As String
+Dim dCount As Integer
+Dim cCount As Integer
+
+
+Dim dcd As String, sql As String, isql As String
+'   sql = "select ID_NUM,TRANS_DTE,abs(TRANS_AMT) AS TRANS_AMT,TRANS_DESC,SOURCE_CDE " & _
+'   "from [jadi].[dbo].[trans_hist] T0 " & _
+'     "where ID_NUM = " & idnumber & _
+'   " and SUBSID_CDE = 'AR' " & _
+'   " and ((CHG_TRM_TRAN_HIST IN ('" & ExTradTrmCde & "'," & "'" & ExLeapTrmCde & "')) and (CHG_YR_TRAN_HIST=" & CStr(ExYrCde) & ")) " & _
+'   "  and (((source_cde in ('@F','@C')) or ((SUBSID_TRANS_STS = 'S') and TRANS_DESC like '%*%')))"
+' get current transactions
+sql = "Sp_GetFCItems " & idnumber
+   With cmd
+     .CommandText = sql
+   Set rs = .Execute
+   End With
+    Credit_Row = 8
+     Debit_Row = 2
+     If Not rs.EOF Then
+   While Not rs.EOF
+      If rs("SOURCE_CDE") = "@F" Or InStr(1, rs("TRANS_DESC"), "*") > 0 Then
+         cell = "B" & CStr(Credit_Row)
+         Sheet1.Range(cell).Value = rs("TRANS_DESC").Value
+         cell = "I" & CStr(Credit_Row)
+         Sheet1.Range(cell).Value = rs("TRANS_AMT").Value
+         Credit_Row = Credit_Row + 1
+      ElseIf rs("SOURCE_CDE") = "@C" Then
+        cell = "B" & CStr(Debit_Row)
+        Sheet4.Range(cell).Value = rs("TRANS_DESC").Value
+        cell = "C" & CStr(Debit_Row)
+        Sheet4.Range(cell).Value = rs("TRANS_AMT").Value
+        Debit_Row = Debit_Row + 1
+        End If
+        rs.MoveNext
+     Wend
+   End If ' not rs.eof ' nothing found jenzabar trans_hist table
+   ' check to see if drop classes date is past
+    CreditsNeeded = (Credit_Row = 8)
+    DebitsNeeded = (Debit_Row = 2)
+    cCount = 0
+    dCount = 0
+   If CreditsNeeded Or DebitsNeeded Then 'didn't find debits or credits check to see if backup table is activated
+    If DropClassesDate <= Format(Now(), "yyyymmdd") Then ' get data from back up table
+        sql = "select ID_NUM,TRANS_DTE,abs(TRANS_AMT) AS TRANS_AMT,TRANS_DESC,SOURCE_CDE " & _
+        "from ousadb.dbo.tblFCA_TRANS_HIST where ID_NUM = " & idnumber & _
+         " and ((source_cde in ('@F','@C')) " & _
+         "   or (TRANS_DESC like '*%'))"
+         With cmd
+            .CommandText = sql
+            Set rs = .Execute
+        End With
+        If Not rs.EOF Then ' found transactions in backup table
+           While Not rs.EOF
+             If rs("SOURCE_CDE") = "@F" Or InStr(1, rs("TRANS_DESC"), "*") > 0 Then
+               If CreditsNeeded Then
+                credits(tCount, 0) = rs("TRANS_DESC").Value
+                credits(tCount, 1) = rs("TRANS_AMT").Value
+                cCount = cCount + 1
+              End If
+             ElseIf rs("SOURCE_CDE") = "@C" Then
+               If DebitsNeeded Then
+                 debits(dCount, 0) = rs("TRANS_DESC").Value
+                 debits(dCount, 1) = rs("TRANS_AMT").Value
+                dCount = dCount + 1
+              End If
+            End If
+             rs.MoveNext
+          Wend
+          If CreditsNeeded And cCount > 0 Then
+           For i = 0 To cCount - 1
+                cell = "B" & CStr(Credit_Row + i)
+               Sheet1.Range(cell).Value = credits(i, 0)
+                cell = "I" & CStr(Credit_Row + i)
+                Sheet1.Range(cell).Value = credits(i, 1)
+            Next
+          End If
+          If DebitsNeeded And dCount > 0 Then
+           For i = 0 To dCount - 1
+             cell = "B" & CStr(Debit_Row + i)
+                Sheet4.Range(cell).Value = debits(i, 0)
+                cell = "C" & CStr(Debit_Row + i)
+                Sheet4.Range(cell).Value = debits(i, 1)
+            Next
+          End If
+          dcd = Mid(DropClassesDate, 5, 2) & "/" & Right(DropClassesDate, 2) & "/" & Left(DropClassesDate, 4)
+          Sheet1.Range("B34:B34").Value = "Classes Dropped on " & dcd & ", Data retrieved from backup files."
+        Else ' no transactions found in backup table
+           If CreditsNeeded And DebitsNeeded Then
+              MsgBox ("No Information Found for: " & idnumber)
+           End If
+        End If
+     Else ' classes not dropped as yet, therefore backup table not activated
+       If Credit_Row = 8 And Debit_Row = 2 Then
+            MsgBox ("No registration charges or credits Found for: " & Student & " for " & SemesterName)
+       ElseIf Debit_Row = 2 Then
+                MsgBox ("No registration charges Found for: " & Student & " for " & SemesterName)
+       ElseIf Credit_Row = 8 Then
+                       MsgBox ("No registration  credits Found for: " & Student & " for " & SemesterName)
+
+       End If
+   End If
+
+End If
+
+Exit Sub
+MyErrorHandler:
+   MsgBox ("Error Encountered: !** " & CStr(Err.Number) + ": " + Err.Description)
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+Dim DefaultFileName As String
+DefaultFileName = Sheet1.Range("I3:I3").Value & "_" & _
+Sheet1.Range("H33:H33").Value & ".pdf"
+'If LCase(Environ("username")) <> "administrator" Then
+ '   MsgBox "Please Use the 'Save' Button below the ID number!"
+ '   Cancel = True
+' End If
+End Sub
+Public Sub SavePDF()
+On Error GoTo pdfProblem
+Dim DefaultFileName As String
+Dim DefaultPath As String
+Dim localFileName As String
+
+Sheet1.Range("I33:I33").Value = (Environ$("Username"))
+If Len(RTrim(Sheet1.Range("H33:H33"))) > 1 Then
+ If Len(RTrim(Sheet1.Range("E32:E32"))) > 2 Then
+   If Sheet1.Range("D30:D30").Value < 1 Then
+ ' change this path every semester
+     DefaultPath = WorkSheetfolder
+     DefaultFileName = DefaultPath & "\" & Sheet1.Range("I3:I3").Value & "_" & _
+     Sheet1.Range("H33:H33").Value & ".pdf"
+     Sheet1.PageSetup.PrintArea = "A1:J39"
+     Sheet4.PageSetup.PrintArea = "A1:C20"
+
+     ThisWorkbook.Sheets(Array("fcEdit", "charges")).Select
+
+    Sheets("fcEdit").Activate
+
+ 
+'    ActiveSheet.ExportAsFixedFormat _
+'            Type:=xlTypePDF, _
+'            Filename:=DefaultFileName, _
+'            Quality:=xlQualityStandard, _
+'            IncludeDocProperties:=True, _
+'            IgnorePrintAreas:=False, _
+'            OpenAfterPublish:=True
+'localFileName = "C:\Users\" & Environ("username") & "\Downloads\" & Sheet1.Range("I3:I3").Value & "_" & Sheet1.Range("H33:H33").Value & ".pdf"
+
+            ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=DefaultFileName, Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, OpenAfterPublish:=True
+' Dim fp As String
+'Dim wb As Workbook
+'Dim ws As Worksheet
+
+'fp = DefaultFileName
+'Set wb = ActiveWorkbook
+'Set ws = Worksheets("fcEdit")
+
+'ws.ExportAsFixedFormat Type:=xlTypePDF, Filename:=fp, Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas:=False, OpenAfterPublish:=True
+         
+     Call ClearPrintArea
+    ' Call SaveFormData
+   Else
+     MsgBox ("Seventy Percent Not Met, please adjust before saving!")
+   End If
+ Else
+   MsgBox ("Student Account Rep name not supplied...Please enter!")
+ End If
+Else
+ MsgBox ("Invalid Name - Unable to Save!")
+End If
+Sheet1.Range("I33:I33").Value = ""
+Exit Sub
+pdfProblem:
+   MsgBox ("Error Encountered: !** " & CStr(Err.Number) + ": " + Err.Description)
+
+End Sub
+'Private Sub ClearComboBoxes()
+'Forms(fcEdit).Controls(ComboBox1).SetFocus
+'Forms(fcEdit).Controls(ComboBox1).ListIndex = 0
+'End Sub
+Private Sub Workbook_Open()
+
+   Application.CommandBars("Worksheet Menu Bar").Controls("File").Controls("Save As...").Enabled = False
+    Application.CommandBars("Worksheet Menu Bar").Controls("File").Controls("Save").Enabled = False
+End Sub
+
+Public Sub getBio()
+On Error GoTo MyErrorHandler
+Dim idnumber As String
+Dim noImage As String
+Dim AlreadyCleared As String
+
+'sConnString = "Provider=sqloledb;Data Source=ousaserver3.oau.oakwood.edu;Initial Catalog=ousadb;" & _
+'"User Id=DataOps;Password=DanaDenyse32;"
+If Not DataInitialized Then
+  Call OpenDataControls
+End If
+'sConnString = "Provider=sqloledb;Data Source=10.3.80.228;Initial Catalog=ousadb;" & _
+'"User Id=DataOps;Password=DanaDenyse32;"
+'clear out cells
+ Sheet1.Range("D6:D6").Value = ""
+Sheet1.Range("B8:B15").Value = ""
+Sheet1.Range("I8:I21").Value = ""
+Sheet4.Range("B2:B19").Value = ""
+Sheet4.Range("C2:C19").Value = ""
+Sheet1.Range("C3:C3").Value = ""
+
+Sheet1.Range("C4:C4").Value = ""
+Sheet1.Range("C5:C5").Value = ""
+Sheet1.Range("H4:H4").Value = ""
+Sheet1.Range("F6:F6").Value = ""
+Sheet1.Range("D23:D23").Value = 0
+'Sheet1.Range("D24:D24").Value = 0
+Sheet1.Range("H33:H33").Value = ""
+Sheet1.Range("I33:I33").Value = ""
+Sheet1.Range("B34:B34").Value = ""
+
+noImage = "\\OUSASERVER03\images\blank.jpg"
+AlreadyCleared = ""
+Student = ""
+
+Sheet1.Image1.Picture = LoadPicture(noImage)
+Call ClearComboBoxes
+' create connection & recordset
+Set conn = New ADODB.Connection
+Set rs = New ADODB.Recordset
+idnumber = Sheet1.Range("I3:I3").Value
+'sConnString = "Provider=sqloledb;Data Source=10.3.80.228;Initial Catalog=jadi;"
+conn.Open sConnString
+ 
+ 
+' sql = "select lastname,firstname,midname,T3.ar_bal_to_dte as accountbalance,cCode,T1.hrs,T1.charges,email,phone," & _
+"lastcleared,studentkey, ClearedOn, ClearedCurrentSession from [ousadb].dbo.[tblStudent] T1 " & _
+" join [jadi].[dbo].[subsid_master] T3 on T3.ID_NUM = T1.idnumber and T3.SUBSID_CDE = 'AR' " & _
+" where T1.idnumber ='" & idnumber & "'"
+sql = "sp_GetStudentData " & idnumber
+Set cmd = New ADODB.Command
+ With cmd
+   .ActiveConnection = conn
+   .CommandText = sql
+   .CommandTimeout = 0
+'   .CommandType =
+   
+ End With
+
+Dim ok As Boolean
+ok = False
+Set rs = cmd.Execute
+ok = Not rs.EOF
+If ok Then
+ 
+' stuff variables on
+ Sheet1.Range("C3:C3").Value = RTrim(rs("firstname")) & " " & _
+ RTrim(rs("midname")) & " " & RTrim(rs("lastname"))
+ Sheet1.Range("C4:C4").Value = rs("phone")
+ Sheet1.Range("C5:C5").Value = rs("email")
+ Sheet1.Range("H4:H4").Value = rs("lastcleared")
+ Student = rs("firstname") & " " & rs("lastname")
+ Select Case rs("cCode")
+  Case "FF"
+      Sheet1.Range("D6:D6").Value = "Freshman"
+   Case "FR"
+      Sheet1.Range("D6:D6").Value = "Freshman"
+  Case "SO"
+     Sheet1.Range("D6:D6").Value = "Sophmore"
+   Case "JR"
+     Sheet1.Range("D6:D6").Value = "Junior"
+   Case "SR"
+     Sheet1.Range("D6:D6").Value = "Senior"
+   Case "GR"
+     Sheet1.Range("D6:D6").Value = "Graduate"
+    Case "AE"
+      Sheet1.Range("D6:D6").Value = "Leap"
+    Case "DI"
+      Sheet1.Range("D6:D6").Value = "Dietetic"
+    Case "EM"
+      Sheet1.Range("D6:D6").Value = "OU Employee"
+ Case Else
+   Sheet1.Range("D6:D6").Value = ""
+ End Select
+   If rs("ClearedCurrentSession") = True Then
+     AlreadyCleared = rs("firstname") & " " & rs("lastname") & " was financially cleared on " & Mid(rs("ClearedOn"), 5, 2) & "/" & Mid(rs("ClearedOn"), 7, 2) & "/" & Left(rs("ClearedOn"), 4)
+   End If
+If (DropClassesDate <= Format(Now(), "yyyymmdd")) And (rs("hrs") = 0) Then
+Sheet1.Range("F6:F6").Value = rs("post_hrs")
+Else
+Sheet1.Range("F6:F6").Value = rs("hrs")
+End If
+Sheet1.Range("D23:D23").Value = rs("accountbalance")
+Sheet1.Range("I32:I32").Value = Now()
+Sheet1.Range("I33:I33").Value = rs("studentkey")
+Sheet1.Range("H33:H33").Value = UCase(rs("lastname"))
+
+   Call getCredits(idnumber)
+   Call GetImage(idnumber)
+   If AlreadyCleared <> "" Then
+     MsgBox (AlreadyCleared)
+   End If
+  
+Else
+  MsgBox ("No record found for : " & idnumber)
+End If
+rs.Close
+If CBool(conn.state And adStateOpen) Then conn.Close
+Set conn = Nothing
+Set rs = Nothing
+'Call ClearComboBoxes
+ Exit Sub
+MyErrorHandler:
+   MsgBox ("Error Encountered: !** " & CStr(Err.Number) + ": " + Err.Description)
+End Sub
