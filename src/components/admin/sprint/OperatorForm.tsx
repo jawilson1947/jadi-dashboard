@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export interface OperatorFormValues {
@@ -15,20 +14,77 @@ export interface OperatorFormValues {
   effectiveTo: string;
 }
 
-const EMPTY: OperatorFormValues = { sourceCode: "", displayName: "", email: "", department: "", isActive: true, isSystem: false, effectiveFrom: "", effectiveTo: "" };
+export interface ObservedCode {
+  code: string;
+  cleared: number;
+  firstAt: string | null;
+  lastAt: string | null;
+}
+
+export const EMPTY_OPERATOR: OperatorFormValues = {
+  sourceCode: "",
+  displayName: "",
+  email: "",
+  department: "",
+  isActive: true,
+  isSystem: false,
+  effectiveFrom: "",
+  effectiveTo: "",
+};
+
+const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null);
+
+/**
+ * Warn when the effective dates exclude clearance actions the code actually has.
+ *
+ * A narrow range is legitimate — that is the whole point of effective dates when a code changes
+ * hands — so this is a caution, never a block. It exists because the opposite mistake is silent:
+ * a profile whose range misses the actions renders as unmapped with no hint that it is even there
+ * (J. Wilson, 2026-09-24).
+ */
+export function coverageWarning(v: Pick<OperatorFormValues, "sourceCode" | "effectiveFrom" | "effectiveTo">, codes: ObservedCode[]): string | null {
+  const observed = codes.find((c) => c.code.trim().toLowerCase() === v.sourceCode.trim().toLowerCase());
+  if (!observed || observed.cleared === 0) return null;
+  const first = day(observed.firstAt);
+  const last = day(observed.lastAt);
+  if (!first || !last) return null;
+  const from = v.effectiveFrom || null;
+  const to = v.effectiveTo || null;
+  if (!from && !to) return null;
+
+  const span = first === last ? first : `${first} to ${last}`;
+  const n = observed.cleared.toLocaleString();
+  if ((from && from > last) || (to && to < first)) {
+    return `These dates exclude all ${n} clearance actions recorded for ${observed.code} (${span}), so it will still show as unmapped.`;
+  }
+  if ((from && from > first) || (to && to < last)) {
+    return `These dates cover only part of the ${n} clearance actions recorded for ${observed.code} (${span}). Actions outside the range need their own profile.`;
+  }
+  return null;
+}
 
 /**
  * Operator profile editor (Spec §7.2). A code with no profile is shown as "Unmapped" everywhere —
  * the application never guesses a person's name from a login code.
  */
-export function OperatorForm({ initial = EMPTY, codes = [] }: { initial?: OperatorFormValues; codes?: Array<{ code: string; cleared: number; firstAt: string | null; lastAt: string | null }> }) {
-  const router = useRouter();
+export function OperatorForm({
+  initial = EMPTY_OPERATOR,
+  codes = [],
+  onSaved,
+  onCancel,
+}: {
+  initial?: OperatorFormValues;
+  codes?: ObservedCode[];
+  onSaved?: () => void;
+  onCancel?: () => void;
+}) {
   const [v, setV] = useState<OperatorFormValues>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const input = "w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm";
   const set = (patch: Partial<OperatorFormValues>) => setV({ ...v, ...patch });
+  const warning = coverageWarning(v, codes);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,8 +110,8 @@ export function OperatorForm({ initial = EMPTY, codes = [] }: { initial?: Operat
       const body = await res.json().catch(() => null);
       if (!res.ok) return setError(body?.error?.message ?? `Request failed (HTTP ${res.status})`);
       setSaved(true);
-      setV(initial.id ? v : EMPTY);
-      router.refresh();
+      if (!initial.id) setV(EMPTY_OPERATOR);
+      onSaved?.();
     } catch {
       setError("The request did not complete.");
     } finally {
@@ -108,6 +164,13 @@ export function OperatorForm({ initial = EMPTY, codes = [] }: { initial?: Operat
         </label>
         <input id="op-to" type="date" value={v.effectiveTo} onChange={(e) => set({ effectiveTo: e.target.value })} min={v.effectiveFrom || undefined} className={input} />
       </div>
+
+      {warning ? (
+        <p role="status" className="md:col-span-2 rounded-md border border-warning bg-surface-1 px-3 py-2 text-xs">
+          <span aria-hidden>⚠</span> {warning} Clear both dates for an open-ended mapping.
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-4 text-sm md:col-span-2">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={v.isActive} onChange={(e) => set({ isActive: e.target.checked })} /> Active
@@ -120,6 +183,11 @@ export function OperatorForm({ initial = EMPTY, codes = [] }: { initial?: Operat
         <button type="submit" disabled={busy} className="rounded-md bg-brand text-brand-ink px-3 py-2 text-sm disabled:opacity-60">
           {busy ? "Saving…" : initial.id ? "Save profile" : "Add profile"}
         </button>
+        {onCancel ? (
+          <button type="button" onClick={onCancel} className="rounded-md border border-border px-3 py-2 text-sm">
+            Cancel
+          </button>
+        ) : null}
         <span role="status" className="text-xs">
           {error ? <span className="text-critical">{error}</span> : saved ? <span className="text-ink-2">Saved.</span> : null}
         </span>

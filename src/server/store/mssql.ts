@@ -151,13 +151,22 @@ export class MssqlAppStore implements AppStore {
       .input("from", sql.Date, o.effectiveFrom)
       .input("to", sql.Date, o.effectiveTo)
       .input("by", sql.VarChar(200), o.updatedBy)
+      // effectiveFrom IS updated on a match. It used to be left alone, which meant a wrong
+      // effective-from could not be corrected from the UI at all: re-submitting the code with the
+      // date cleared missed the (code, from) key and inserted a second row instead (J. Wilson,
+      // 2026-09-24). Matching on the id first makes the edit an edit.
       .query(`MERGE dash.OperatorProfile AS t
               USING (SELECT @id AS id, @code AS sourceCode, @from AS effectiveFrom) AS s
                 ON t.id = s.id OR (t.sourceCode = s.sourceCode AND ((t.effectiveFrom IS NULL AND s.effectiveFrom IS NULL) OR t.effectiveFrom = s.effectiveFrom))
               WHEN MATCHED THEN UPDATE SET displayName = @name, email = @email, department = @dept, isActive = @active,
-                                           isSystem = @system, effectiveTo = @to, updatedAt = SYSUTCDATETIME(), updatedBy = @by
+                                           isSystem = @system, effectiveFrom = @from, effectiveTo = @to,
+                                           updatedAt = SYSUTCDATETIME(), updatedBy = @by
               WHEN NOT MATCHED THEN INSERT (id, sourceCode, displayName, email, department, isActive, isSystem, effectiveFrom, effectiveTo, updatedBy)
                                    VALUES (@id, @code, @name, @email, @dept, @active, @system, @from, @to, @by);`);
+  }
+  async deleteOperatorProfile(id: string): Promise<boolean> {
+    const r = await (await this.pool()).request().input("id", sql.UniqueIdentifier, id).query("DELETE FROM dash.OperatorProfile WHERE id = @id");
+    return (r.rowsAffected[0] ?? 0) > 0;
   }
 
   async getSetting<T>(key: string) {

@@ -127,7 +127,10 @@ export interface AppStore {
   setSprintWindow(termKey: string, start: string, end: string, updatedBy: string | null): Promise<void>;
   // operator profiles (§7.2)
   listOperatorProfiles(): Promise<OperatorProfileRecord[]>;
+  /** An update carrying a known `id` may change `effectiveFrom`; without one the row is keyed on (code, from). */
   upsertOperatorProfile(record: OperatorProfileRecord): Promise<void>;
+  /** Returns false when no profile has that id — a delete of something already gone is not an error. */
+  deleteOperatorProfile(id: string): Promise<boolean>;
   // settings
   getSetting<T = unknown>(key: string): Promise<T | null>;
   setSetting<T = unknown>(key: string, value: T, updatedBy: string | null): Promise<void>;

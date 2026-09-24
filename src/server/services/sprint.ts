@@ -7,7 +7,7 @@ import type { TermMetadata } from "../repositories/types";
 import { getCurrentTerms } from "../metadata/terms";
 import { buildBreakdown, type ClearanceBreakdownRow } from "../metadata/clearance-breakdown";
 import { classificationDisplayName } from "../metadata/classifications";
-import { resolveOperator } from "../metadata/operators";
+import { resolveOperator, type OperatorRange, type OperatorResolution } from "../metadata/operators";
 import { runJob } from "../jobs/runner";
 import { isStale } from "./calculations";
 import type { Metric, MetricStatus } from "./dashboard";
@@ -54,6 +54,10 @@ export interface SprintOperatorRow {
   displayName: string;
   isSystem: boolean;
   mapped: boolean;
+  /** Why it did or did not resolve — "no profile" and "dates exclude these actions" are not the same. */
+  reason: OperatorResolution;
+  /** Effective ranges that exist for the code when `reason` is "out-of-range". */
+  ranges: OperatorRange[];
   cleared: number;
   sharePct: number | null;
   firstAt: string | null;
@@ -283,6 +287,8 @@ export function buildOperatorRows(rows: Array<{ operatorCode: string; cleared: n
         displayName: resolved.displayName,
         isSystem: resolved.isSystem,
         mapped: resolved.mapped,
+        reason: resolved.reason,
+        ranges: resolved.ranges,
         cleared: r.cleared,
         sharePct: total > 0 ? (r.cleared / total) * 100 : null,
         firstAt: r.firstAt,

@@ -165,10 +165,20 @@ export class MemoryAppStore implements AppStore {
   }
   async upsertOperatorProfile(record: OperatorProfileRecord) {
     this.load();
+    // An id identifies the row to change, including its effective dates. Without one, fall back to
+    // the natural key so a re-submitted code+from updates rather than duplicating.
     const i = this.state.operators.findIndex((o) => o.id === record.id || (o.sourceCode === record.sourceCode && o.effectiveFrom === record.effectiveFrom));
     if (i >= 0) this.state.operators[i] = { ...record, id: this.state.operators[i].id };
     else this.state.operators.push(record);
     this.persist();
+  }
+  async deleteOperatorProfile(id: string) {
+    this.load();
+    const i = this.state.operators.findIndex((o) => o.id === id);
+    if (i < 0) return false;
+    this.state.operators.splice(i, 1);
+    this.persist();
+    return true;
   }
 
   async getSetting<T>(key: string) {

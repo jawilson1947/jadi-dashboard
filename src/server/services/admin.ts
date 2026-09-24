@@ -99,7 +99,15 @@ export async function upsertOperator(actor: Principal, input: OperatorInput, cor
     updatedAt: new Date(),
     updatedBy: actor.userId,
   };
-  await store.upsertOperatorProfile(record);
+  try {
+    await store.upsertOperatorProfile(record);
+  } catch (err) {
+    // One profile per (code, effective-from), and one open-ended profile per code — enforced by two
+    // filtered unique indexes. Editing a date into a slot another row holds should read as a
+    // conflict, not as an internal error.
+    if (isDuplicateKey(err)) throw new Error(`Another profile for ${record.sourceCode} already covers that effective-from date. Edit or remove that one instead.`);
+    throw err;
+  }
   await audit(actor, "admin.change", {
     correlationId,
     targetType: "operatorProfile",
@@ -107,6 +115,29 @@ export async function upsertOperator(actor: Principal, input: OperatorInput, cor
     metadata: { displayName: record.displayName, isActive: record.isActive, effectiveFrom: record.effectiveFrom, effectiveTo: record.effectiveTo },
   });
   return record;
+}
+
+function isDuplicateKey(err: unknown): boolean {
+  const n = (err as { number?: number } | null)?.number;
+  return n === 2601 || n === 2627;
+}
+
+/**
+ * Remove a profile outright. Deleting is the only way to retire a mapping that should never have
+ * existed; a mapping that merely ended belongs in `effectiveTo` so past actions keep resolving.
+ */
+export async function deleteOperator(actor: Principal, id: string, correlationId?: string, store: AppStore = getAppStore()): Promise<boolean> {
+  const existing = (await store.listOperatorProfiles()).find((o) => o.id === id) ?? null;
+  const removed = await store.deleteOperatorProfile(id);
+  if (removed) {
+    await audit(actor, "admin.change", {
+      correlationId,
+      targetType: "operatorProfile",
+      targetId: existing?.sourceCode ?? id,
+      metadata: { action: "delete", displayName: existing?.displayName ?? null, effectiveFrom: existing?.effectiveFrom ?? null, effectiveTo: existing?.effectiveTo ?? null },
+    });
+  }
+  return removed;
 }
 
 export async function listOperators(store: AppStore = getAppStore()): Promise<OperatorProfileRecord[]> {

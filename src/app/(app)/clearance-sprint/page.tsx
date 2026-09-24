@@ -202,7 +202,8 @@ function ByDate({ rows, canDrillDown }: { rows: SprintDayRow[]; canDrillDown: bo
 /** §7.2 — counts per ClearedBy code, resolved through Operator Profiles, Unknown/Unmapped kept visible. */
 function ByOperator({ view, canDrillDown, canManage, tz }: { view: Awaited<ReturnType<typeof getSprintView>>; canDrillDown: boolean; canManage: boolean; tz: string }) {
   const rows = view.byOperator;
-  const unmapped = rows.filter((r) => !r.mapped);
+  const needsProfile = rows.filter((r) => r.reason === "no-profile" || r.reason === "blank-code");
+  const outOfRange = rows.filter((r) => r.reason === "out-of-range");
   const total = rows.reduce((s, r) => s + r.cleared, 0);
   return (
     <section className="card space-y-3">
@@ -212,14 +213,23 @@ function ByOperator({ view, canDrillDown, canManage, tz }: { view: Awaited<Retur
         title="Clearance actions by operator"
         description={`${formatCount(total)} clearance actions across ${formatCount(rows.length)} source codes. Automatic clearances and unmapped codes are shown in a muted bar and labelled in the table.`}
       />
-      {unmapped.length > 0 ? (
+      {needsProfile.length > 0 || outOfRange.length > 0 ? (
         <p className="text-xs text-ink-2">
-          {formatCount(unmapped.length)} code{unmapped.length === 1 ? "" : "s"} have no operator profile and are shown as “Unmapped”.
+          {needsProfile.length > 0 ? (
+            <>
+              {formatCount(needsProfile.length)} code{needsProfile.length === 1 ? "" : "s"} have no operator profile and are shown as “Unmapped”.{" "}
+            </>
+          ) : null}
+          {outOfRange.length > 0 ? (
+            <>
+              {formatCount(outOfRange.length)} code{outOfRange.length === 1 ? "" : "s"} do have a profile, but its effective dates exclude these clearance actions.{" "}
+            </>
+          ) : null}
           {canManage ? (
             <>
               {" "}
               <Link href="/admin/operators" className="text-brand">
-                Name them under Administration → Operators
+                Fix them under Administration → Operators
               </Link>
               .
             </>
@@ -250,7 +260,8 @@ function ByOperator({ view, canDrillDown, canManage, tz }: { view: Awaited<Retur
                     r.displayName
                   )}
                   {r.isSystem ? <span className="ml-2 text-xs text-ink-3">automatic</span> : null}
-                  {!r.mapped && !r.isSystem ? <span className="ml-2 text-xs text-warning">unmapped</span> : null}
+                  {r.reason === "no-profile" || r.reason === "blank-code" ? <span className="ml-2 text-xs text-warning">unmapped</span> : null}
+                  {r.reason === "out-of-range" ? <span className="ml-2 text-xs text-serious">outside profile dates</span> : null}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-xs">{r.code || "(blank)"}</td>
                 <td className="px-3 py-1.5 text-right tabular">{formatCount(r.cleared)}</td>
