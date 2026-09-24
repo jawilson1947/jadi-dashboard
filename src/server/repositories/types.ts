@@ -289,9 +289,17 @@ export type TransactionScope = "current" | "global";
 /** Bio Spec 1.5.1 — one row of the Sp_GetFCWorksheetItems recordset. */
 export interface WorksheetItemRow {
   description: string;
+  /** ABS(TRANS_AMT) as the procedure returns it: magnitude only. `itemType` carries the direction. */
   amount: number;
   postedOn: string | null;
   sourceCode: string | null;
+  /**
+   * ITEM_TYPE from the procedure: 'credit' or 'charge' (D-3, 2026-09-24). Because the procedure
+   * returns ABS(TRANS_AMT), this is the ONLY thing that says whether a row adds to or reduces what
+   * the student owes: 'credit' counts negative in the net amount. The unsigned `amount` is left as
+   * returned so the table shows the same figure the procedure and the filed worksheet show.
+   */
+  itemType: string | null;
 }
 
 /**

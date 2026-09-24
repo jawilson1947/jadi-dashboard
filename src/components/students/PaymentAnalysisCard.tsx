@@ -72,6 +72,14 @@ export function PaymentAnalysisCard({ analysis, studentId }: { analysis: Payment
               analysis.reconciliationDifference,
             )}. The balance column is authoritative (A-18); the difference is shown rather than hidden, because a collection notice should never quote a figure nobody has reconciled.`}
       </p>
+
+      {analysis.futureDatedRows > 0 ? (
+        <p className="text-xs text-ink-3">
+          {analysis.futureDatedRows} scheduled transaction{analysis.futureDatedRows === 1 ? "" : "s"} dated after today, netting{" "}
+          {formatCurrency(analysis.futureDatedNet)}, {analysis.futureDatedRows === 1 ? "is" : "are"} excluded from the figures above — the account balance does not
+          contain {analysis.futureDatedRows === 1 ? "it" : "them"} yet.
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -1,47 +1,33 @@
-import type { ClearanceAnalysis } from "@/server/services/clearance-analysis";
+import { itemDirection, itemTypeLabel, type ClearanceAnalysis } from "@/server/services/clearance-analysis";
 import { formatCurrency, formatIsoDateSafe } from "@/lib/format";
 
 /**
  * Bio Spec card 5 — Student Financial Clearance Status.
  *
- * One figure answers "what must this student pay to clear", and it comes from the institution's own
- * `fn_CostAnalysis` (D-2). The Bio Spec's inline 80% formula is deliberately not shown alongside it:
- * two competing answers on one screen is worse than one with a stated source. When the function has
- * no row, the card says so rather than printing a zero that reads as "nothing to pay".
+ * ONE figure answers "what must this student pay to clear", and it is the header stat computed from
+ * the worksheet itself: AccountBalance + 80% of the net (debits − credits), floored at zero
+ * (D-4, 2026-09-24, Jim). The `fn_CostAnalysis` panel that used to sit below it was removed on the
+ * same decision — two answers to that question on one screen is worse than one whose arithmetic the
+ * reader can check against the table beneath it. `costAnalysis` is still carried on the API
+ * response for reconciliation work; it is simply not rendered here.
  */
 export function ClearanceCard({ analysis }: { analysis: ClearanceAnalysis }) {
   return (
     <section className="card space-y-4" aria-label="Financial clearance status">
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <Stat label="Account balance" value={formatCurrency(analysis.accountBalance)} hint="tblStudent.AccountBalance (authoritative, A-18)" />
         <Stat label="Worksheet net amount" value={formatCurrency(analysis.worksheetNetAmount)} hint={`${analysis.items.length} item${analysis.items.length === 1 ? "" : "s"} on the worksheet`} />
         <Stat label="Total monies due" value={formatCurrency(analysis.totalMoniesDue)} hint="Balance plus the worksheet net" />
-      </div>
-
-      <div className="rounded-md border border-border p-4">
-        <p className="text-xs text-ink-3">Amount needed to clear financially</p>
-        {analysis.status === "ok" && analysis.amountNeededToClear !== null ? (
-          <>
-            <p className="text-2xl font-semibold tabular">{formatCurrency(analysis.amountNeededToClear)}</p>
-            <p className="text-xs text-ink-3 mt-1">
-              Computed by the institution&apos;s cost analysis (the 80% rule), not by this application.
-              {analysis.costAnalysis ? ` Payment plan: ${formatCurrency(analysis.costAnalysis.payment)} · loan ${formatCurrency(analysis.costAnalysis.loan)}.` : ""}
-            </p>
-            {analysis.costAnalysis ? (
-              <p className="text-xs text-ink-3 mt-1">
-                From charges of {formatCurrency(analysis.costAnalysis.charges)} against credits of {formatCurrency(analysis.costAnalysis.credits)} this term, with 80% of charges at{" "}
-                {formatCurrency(analysis.costAnalysis.eighty)}. Anyone asked to pay this figure is entitled to see where it came from.
-              </p>
-            ) : null}
-          </>
-        ) : analysis.status === "no-amount-outstanding" ? (
-          <p className="text-sm mt-1">No amount outstanding for clearance — the worksheet nets to a credit.</p>
-        ) : (
-          <p className="text-sm mt-1">
-            The cost analysis returned no row for this student, so the amount cannot be stated. This is not the same as owing nothing — ask an administrator to check the student&apos;s
-            payment-plan record.
-          </p>
-        )}
+        <Stat
+          label="80% of current charges"
+          value={formatCurrency(analysis.eightyPercentOfCharges)}
+          hint={`80% of the net ${formatCurrency(analysis.worksheetNetAmount)} (debits less credits)`}
+        />
+        <Stat
+          label="Amount needed to Clear"
+          value={formatCurrency(analysis.amountNeededToClearComputed)}
+          hint="Account balance plus 80% of current charges; zero when that comes out negative"
+        />
       </div>
 
       {analysis.items.length > 0 ? (
@@ -52,21 +38,38 @@ export function ClearanceCard({ analysis }: { analysis: ClearanceAnalysis }) {
               <tr>
                 <th scope="col" className="px-3 py-2 font-medium text-ink-2">Date</th>
                 <th scope="col" className="px-3 py-2 font-medium text-ink-2">Item</th>
+                <th scope="col" className="px-3 py-2 font-medium text-ink-2">Type</th>
                 <th scope="col" className="px-3 py-2 font-medium text-ink-2 text-right">Amount</th>
               </tr>
             </thead>
             <tbody>
-              {analysis.items.map((r, i) => (
-                <tr key={`${r.description}-${i}`} className="border-t border-border">
-                  <td className="px-3 py-2 whitespace-nowrap">{formatIsoDateSafe(r.postedOn)}</td>
-                  <td className="px-3 py-2">{r.description || "—"}</td>
-                  <td className={`px-3 py-2 text-right tabular ${r.amount < 0 ? "text-good" : ""}`}>{formatCurrency(r.amount)}</td>
-                </tr>
-              ))}
+              {analysis.items.map((r, i) => {
+                const credit = itemDirection(r) === "credit";
+                return (
+                  <tr key={`${r.description}-${i}`} className="border-t border-border">
+                    <td className="px-3 py-2 whitespace-nowrap">{formatIsoDateSafe(r.postedOn)}</td>
+                    <td className="px-3 py-2">{r.description || "—"}</td>
+                    <td className={`px-3 py-2 whitespace-nowrap ${credit ? "text-good" : "text-ink-2"}`}>{itemTypeLabel(r)}</td>
+                    <td className={`px-3 py-2 text-right tabular ${credit ? "text-good" : ""}`}>{formatCurrency(Math.abs(r.amount))}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
+              <tr className="border-t border-border text-ink-2">
+                <td className="px-3 py-2" colSpan={3}>
+                  Total debits ({analysis.totals.debitCount} item{analysis.totals.debitCount === 1 ? "" : "s"})
+                </td>
+                <td className="px-3 py-2 text-right tabular">{formatCurrency(analysis.totals.debits)}</td>
+              </tr>
+              <tr className="text-ink-2">
+                <td className="px-3 py-2" colSpan={3}>
+                  Total credits ({analysis.totals.creditCount} item{analysis.totals.creditCount === 1 ? "" : "s"})
+                </td>
+                <td className="px-3 py-2 text-right tabular text-good">−{formatCurrency(analysis.totals.credits)}</td>
+              </tr>
               <tr className="border-t border-border font-medium">
-                <td className="px-3 py-2" colSpan={2}>Net</td>
+                <td className="px-3 py-2" colSpan={3}>Net amount</td>
                 <td className="px-3 py-2 text-right tabular">{formatCurrency(analysis.worksheetNetAmount)}</td>
               </tr>
             </tfoot>

@@ -58,6 +58,15 @@ export interface PaymentAnalysis {
   collectionsRecommended: boolean;
   /** Distinct from "last credit was long ago" — the account has never had a credit at all. */
   noCreditsOnFile: boolean;
+  /**
+   * Rows dated AFTER today — scheduled postings such as a future payroll deduction (D-5,
+   * 2026-09-24). They are excluded from every figure above, because `AccountBalance` does not
+   * contain them yet: counting them made the history disagree with the balance and produced a
+   * NEGATIVE "days since last credit". They are reported rather than dropped silently, since a
+   * scheduled payment is exactly what someone deciding on collections wants to know about.
+   */
+  futureDatedRows: number;
+  futureDatedNet: number;
 }
 
 export function analyzePayments(
@@ -67,8 +76,11 @@ export function analyzePayments(
 ): PaymentAnalysis {
   const today = opts.today ?? new Date().toISOString().slice(0, 10);
   const collectionsDays = opts.collectionsDays ?? COLLECTIONS_DAYS;
-  const debits = rows.filter((r) => r.amount > 0);
-  const credits = rows.filter((r) => r.amount < 0);
+  // Scheduled postings are held out of the analysis (D-5) — see `futureDatedRows`.
+  const future = rows.filter((r) => r.postedOn > today);
+  const posted = future.length ? rows.filter((r) => r.postedOn <= today) : rows;
+  const debits = posted.filter((r) => r.amount > 0);
+  const credits = posted.filter((r) => r.amount < 0);
 
   const totalDebits = round2(debits.reduce((t, r) => t + r.amount, 0));
   const totalCredits = round2(credits.reduce((t, r) => t + Math.abs(r.amount), 0));
@@ -84,7 +96,7 @@ export function analyzePayments(
   return {
     totalDebits,
     totalCredits,
-    transactionCount: rows.length,
+    transactionCount: posted.length,
     creditCount: credits.length,
     lastCreditOn: lastCredit,
     daysSinceLastCredit,
@@ -96,6 +108,8 @@ export function analyzePayments(
     reconciliationDifference: round2(accountBalance - (totalDebits - totalCredits)),
     collectionsRecommended: accountBalance > 0 && daysSinceLastCredit !== null && daysSinceLastCredit > collectionsDays,
     noCreditsOnFile: credits.length === 0,
+    futureDatedRows: future.length,
+    futureDatedNet: round2(future.reduce((t, r) => t + r.amount, 0)),
   };
 }
 

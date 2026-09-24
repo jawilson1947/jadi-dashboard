@@ -284,12 +284,23 @@ export class MssqlDataProvider implements DataProvider {
       .input("id", sql.VarChar(50), id)
       .input("dropDate", sql.Date, new Date(`${dropClassesDate}T00:00:00Z`))
       .query<RawWorksheetItem>(QS.worksheetItems);
-    return lastSet(r).map((row) => ({
+    const raw = lastNonEmptySet(r);
+    const rows: WorksheetItemRow[] = raw.map((row) => ({
       description: row.TRANS_DESC ?? "",
       amount: money(row.TRANS_AMT),
       postedOn: row.TRANS_DTE ? new Date(row.TRANS_DTE).toISOString().slice(0, 10) : null,
       sourceCode: row.SOURCE_CDE ?? null,
+      itemType: pickItemType(row),
     }));
+    // If the procedure's item-type column is not where we looked, every row would silently count as
+    // a debit. Say so once, with the column names it actually returned, rather than showing a wrong
+    // net amount quietly.
+    if (rows.length > 0 && rows.every((r) => r.itemType === null)) {
+      console.warn(
+        `[clearance] Sp_GetFCWorksheetItems returned no item-type column for ${id}; columns were: ${Object.keys(raw[0] ?? {}).join(", ")}`,
+      );
+    }
+    return rows;
   }
 
   async getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null> {
@@ -323,6 +334,19 @@ export class MssqlDataProvider implements DataProvider {
 }
 
 /** Multi-statement batches (temp-table prelude) return their SELECT as the final recordset. */
+/**
+ * Sp_GetFCWorksheetItems can emit more than one recordset (the live-table pass and the frozen
+ * backup pass), and whichever branch did not fire comes back empty. Taking the LAST set blindly
+ * would then show an empty worksheet, so take the last set that actually has rows.
+ */
+function lastNonEmptySet<T>(r: sql.IResult<T>): T[] {
+  for (let i = r.recordsets.length - 1; i >= 0; i--) {
+    const set = r.recordsets[i] as unknown as T[];
+    if (set?.length) return set;
+  }
+  return r.recordset ?? [];
+}
+
 function lastSet<T>(r: sql.IResult<T>): T[] {
   return r.recordsets.length ? (r.recordsets[r.recordsets.length - 1] as unknown as T[]) : r.recordset;
 }
@@ -377,8 +401,30 @@ interface RawTransaction {
   TRANS_DTE: Date | string | null; TRANS_DESC: string | null; TRANS_AMT: number | null; SOURCE_CDE: string | null;
 }
 
-/** Sp_GetFCWorksheetItems returns trans_hist-shaped rows; the alias documents where they come from. */
-type RawWorksheetItem = RawTransaction;
+/**
+ * Sp_GetFCWorksheetItems returns trans_hist-shaped rows plus an item-type column carrying
+ * 'Debit' / 'Credit', which is what decides the sign of a row in the net amount (D-3).
+ */
+interface RawWorksheetItem extends RawTransaction {
+  [column: string]: unknown;
+}
+
+/**
+ * Read the item-type column without hard-coding one spelling of its name. The procedure's own
+ * casing has been reported as both ITEM_TYPE and ItemType, and a single wrong guess silently blanks
+ * the column and — worse — makes every credit count as a debit. So: match any column whose name
+ * reduces to "itemtype" (or a bare "type"), ignoring case, underscores and spaces.
+ */
+const ITEM_TYPE_COLUMNS = new Set(["itemtype", "type"]);
+
+export function pickItemType(row: Record<string, unknown>): string | null {
+  for (const [key, value] of Object.entries(row)) {
+    if (!ITEM_TYPE_COLUMNS.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase())) continue;
+    const text = value == null ? "" : String(value).trim();
+    if (text) return text;
+  }
+  return null;
+}
 
 interface RawCostAnalysis { eighty: number | null; amtdue: number | null; needed: number | null; loan: number | null; payment: number | null; charges: number | null; credits: number | null; }
 

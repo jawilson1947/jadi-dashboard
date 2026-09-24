@@ -5,13 +5,13 @@ import { audit } from "@/server/audit/audit";
 import { handle, ok } from "@/server/api/respond";
 import { idFromUrl } from "@/server/api/params";
 import { optionalFilter } from "@/server/api/query";
-import { getTransactionsView } from "@/server/services/transactions";
+import { TRANSACTIONS_PAGE_SIZE, getTransactionsView } from "@/server/services/transactions";
 
 const querySchema = z.object({
   scope: z.enum(["current", "global"]).default("global"),
   year: optionalFilter(z.string().regex(/^\d{4}$/)),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(5).max(200).default(50),
+  pageSize: z.coerce.number().int().min(5).max(200).default(TRANSACTIONS_PAGE_SIZE),
 });
 
 /**

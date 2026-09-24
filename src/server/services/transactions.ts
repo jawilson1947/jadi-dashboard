@@ -15,7 +15,20 @@ import type { DataProvider, StudentKey, TransactionRow, TransactionScope } from 
 
 export const SOURCE_LABELS_SETTING = "transactionSourceLabels";
 
-/** Seeded from the Bio Spec. The spec's `'IV’` carries a typographic quote; the code is `IV`. */
+/** Rows per page within a year (Bio Spec 2.1). Ten, by decision 2026-09-24 (Jim). */
+export const TRANSACTIONS_PAGE_SIZE = 10;
+
+/**
+ * Seeded from the Bio Spec's CASE. The spec's `'IV’` carries a typographic quote; the code is `IV`.
+ *
+ * The last two are NOT in the spec — its CASE ends `else SOURCE_CDE`, so they were rendering as raw
+ * codes. They were named from the data during 5c validation (2026-09-24): `JL` posts adjustments and
+ * their reversals against prior-year aid, `CV` carries pre-2010 rows that look like ordinary tuition,
+ * fees and refunds and stop when the legacy system did. The names are descriptive only: the cash and
+ * financial-aid RATIOS still key on `RC` and `FA` alone, so an old account whose aid was posted under
+ * `CV` or adjusted under `JL` reports a financial-aid ratio lower than reality. Changing that needs a
+ * business decision, not a label.
+ */
 export const DEFAULT_SOURCE_LABELS: Record<string, string> = {
   FA: "Financial Aid",
   RC: "Cash or Credit Card",
@@ -24,6 +37,8 @@ export const DEFAULT_SOURCE_LABELS: Record<string, string> = {
   LB: "Payroll Deduction",
   IV: "Refund",
   MS: "Miscellaneous",
+  JL: "Journal Adjustment",
+  CV: "Converted (legacy system)",
 };
 
 export async function getSourceLabels(store: AppStore = getAppStore()): Promise<Record<string, string>> {
@@ -90,7 +105,7 @@ export async function getTransactionsView(
   // Bio Spec 2.1: pagination is per year of transactions. Default to the newest year with activity.
   const year = query.year ?? years[0]?.year ?? null;
   const inYear = year ? rows.filter((r) => r.postedOn.slice(0, 4) === year) : rows;
-  const pageSize = Math.min(Math.max(query.pageSize ?? 50, 5), 200);
+  const pageSize = Math.min(Math.max(query.pageSize ?? TRANSACTIONS_PAGE_SIZE, 5), 200);
   const page = Math.max(query.page ?? 1, 1);
   const start = (page - 1) * pageSize;
 

@@ -295,7 +295,15 @@ export class MockDataProvider implements DataProvider {
   async getClearanceWorksheetItems(id: StudentKey, _dropClassesDate: string): Promise<WorksheetItemRow[]> {
     void _dropClassesDate;
     const rows = await this.getStudentTransactions(id, "current");
-    return rows.map((r) => ({ description: r.description, amount: r.amount, postedOn: r.postedOn, sourceCode: r.sourceCode }));
+    // The procedure hands back an unsigned amount plus ITEM_TYPE; the mock mirrors that shape, so a
+    // credit here is a positive amount tagged 'Credit' exactly as staging returns it (D-3).
+    return rows.map((r) => ({
+      description: r.description,
+      amount: Math.abs(r.amount),
+      postedOn: r.postedOn,
+      sourceCode: r.sourceCode,
+      itemType: r.amount < 0 ? "Credit" : "Debit",
+    }));
   }
 
   /**
