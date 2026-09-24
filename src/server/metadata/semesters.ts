@@ -103,7 +103,9 @@ export function semesterLabel(code: string | null | undefined, index: Map<string
   if (!code) return "—";
   const r = resolveSemester(code, index);
   if (r.matched) return r.semesterName;
-  return r.reason === "never-cleared" ? "Never cleared" : `${r.termKey} (unknown term)`;
+  // XX0000 means no term of record at all — not "was never cleared", which the column name invites
+  // (J. Wilson, 2026-09-24). Clearance is the ClearedCurrentSession flag, never this code alone.
+  return r.reason === "never-cleared" ? "No semester on record" : `${r.termKey} (unknown term)`;
 }
 
 function key(code: string): string {

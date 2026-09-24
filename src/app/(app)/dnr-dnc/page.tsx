@@ -37,9 +37,10 @@ const COLUMNS: Column<DnrDncTableRow>[] = [
   { key: "firstName", label: "First name", sortable: true },
   { key: "accountBalance", label: "Balance", sortable: true, align: "right", render: (r) => formatCurrency(r.accountBalance) },
   { key: "email", label: "Email" },
-  { key: "lastCleared", label: "Last cleared", sortable: true, render: (r) => r.lastCleared ?? "—" },
+  { key: "lastCleared", label: "Last Semester", sortable: true, render: (r) => r.lastCleared ?? "—" },
   { key: "enrolledCurrentTerm", label: "Enrolled now", render: (r) => (r.enrolledCurrentTerm ? "Yes" : "No") },
-  { key: "clearedCurrentSession", label: "Cleared now", render: (r) => (r.clearedCurrentSession ? "Yes" : "No") },
+  // The flag belongs to the Last Semester column beside it, not to today (J. Wilson, 2026-09-24).
+  { key: "clearedCurrentSession", label: "Cleared for that semester", render: (r) => (r.clearedCurrentSession ? "Yes" : "No") },
 ];
 
 /**

@@ -222,9 +222,9 @@ export const DNR_DNC_EXPORT_COLUMNS: CsvColumn<DnrDncTableRow>[] = [
   { header: "First name", value: (r) => r.firstName },
   { header: "Account balance", value: (r) => r.accountBalance.toFixed(2) },
   { header: "Email", value: (r) => r.email },
-  { header: "Last cleared semester", value: (r) => r.lastCleared ?? "" },
+  { header: "Last Semester", value: (r) => r.lastCleared ?? "" },
   { header: "Currently enrolled", value: (r) => (r.enrolledCurrentTerm ? "Yes" : "No") },
-  { header: "Currently cleared", value: (r) => (r.clearedCurrentSession ? "Yes" : "No") },
+  { header: "Cleared for that semester", value: (r) => (r.clearedCurrentSession ? "Yes" : "No") },
 ];
 
 /**

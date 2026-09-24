@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MockDataProvider } from "@/server/repositories/mock/provider";
-import { SearchInputError, buildSearchQuery, escapeLike, getStudentProfile, searchStudents } from "@/server/services/students";
+import { PAGE_SIZE_DEFAULT, SearchInputError, buildSearchQuery, clearanceState, escapeLike, getStudentProfile, searchStudents } from "@/server/services/students";
 import type { Principal } from "@/server/authz/permissions";
 
 const provider = new MockDataProvider();
@@ -44,7 +44,89 @@ describe("student search guards (Spec §10.1, Bio Spec 1.1–1.2)", () => {
     const result = await searchStudents({ by: "name", lastName: "an" }, provider);
     expect(result.rows.length).toBeGreaterThan(0);
     expect(result.rows.every((r) => r.lastName.toLowerCase().includes("an"))).toBe(true);
-    expect(result.truncated).toBe(result.rows.length >= result.limit);
+    expect(result.truncated).toBe(result.totalRows >= result.limit);
+  });
+
+  it("returns every match when no page size is asked for, so an unpaged caller is not quietly cut off", async () => {
+    const result = await searchStudents({ by: "name", lastName: "an" }, provider);
+    expect(result.rows.length).toBe(result.totalRows);
+    expect(result.page).toBe(1);
+    expect(result.pageCount).toBe(1);
+  });
+});
+
+describe("the clearance flag belongs to the LastCleared term, not to today (2026-09-24)", () => {
+  const CURRENT = ["FA2026", "FL2026"];
+  const base = { enrolledCurrentTerm: true, clearedCurrentSession: true, lastCleared: "FA2026" };
+
+  it("calls a student cleared only when the flag is set AND the record sits in the current term", () => {
+    expect(clearanceState(base, CURRENT)).toBe("cleared");
+    expect(clearanceState({ ...base, lastCleared: "FL2026" }, CURRENT)).toBe("cleared");
+  });
+
+  it("does not let a flag against an older semester claim the current one", () => {
+    expect(clearanceState({ ...base, lastCleared: "SP2026" }, CURRENT)).toBe("cleared-prior");
+  });
+
+  it("treats the no-term sentinel as a past clearance at best, never a current one", () => {
+    expect(clearanceState({ ...base, lastCleared: "XX0000" }, CURRENT)).toBe("cleared-prior");
+    expect(clearanceState({ ...base, lastCleared: null }, CURRENT)).toBe("cleared-prior");
+  });
+
+  it("keeps an unset flag and a missing enrollment as they were", () => {
+    expect(clearanceState({ ...base, clearedCurrentSession: false }, CURRENT)).toBe("not-cleared");
+    expect(clearanceState({ ...base, enrolledCurrentTerm: false }, CURRENT)).toBe("not-enrolled");
+    expect(clearanceState({ lastCleared: "SP2026", clearedCurrentSession: true, enrolledCurrentTerm: false }, CURRENT)).toBe("not-enrolled");
+  });
+
+  it("derives the state on every search row rather than leaving it to the provider", async () => {
+    const result = await searchStudents({ by: "name", lastName: "an" }, provider);
+    for (const row of result.rows) {
+      expect(row.state).toBe(clearanceState(row, row.currentTermRecord ? [row.lastCleared!] : []));
+      if (row.state === "cleared") expect(row.currentTermRecord).toBe(true);
+    }
+  });
+});
+
+describe("paged search results (10 per page)", () => {
+  it("serves one page of the matches while counting all of them", async () => {
+    const all = await searchStudents({ by: "name", lastName: "an" }, provider);
+    const first = await searchStudents({ by: "name", lastName: "an", pageSize: PAGE_SIZE_DEFAULT }, provider);
+
+    expect(PAGE_SIZE_DEFAULT).toBe(10);
+    expect(first.totalRows).toBe(all.totalRows);
+    expect(first.rows.length).toBe(Math.min(PAGE_SIZE_DEFAULT, all.totalRows));
+    expect(first.rows.map((r) => r.idnumber)).toEqual(all.rows.slice(0, PAGE_SIZE_DEFAULT).map((r) => r.idnumber));
+    expect(first.pageCount).toBe(Math.max(1, Math.ceil(all.totalRows / PAGE_SIZE_DEFAULT)));
+  });
+
+  it("walks the pages without repeating or dropping a student", async () => {
+    const all = await searchStudents({ by: "name", lastName: "an" }, provider);
+    const seen: string[] = [];
+    const pageCount = Math.max(1, Math.ceil(all.totalRows / PAGE_SIZE_DEFAULT));
+    for (let page = 1; page <= pageCount; page++) {
+      const p = await searchStudents({ by: "name", lastName: "an", page, pageSize: PAGE_SIZE_DEFAULT }, provider);
+      expect(p.page).toBe(page);
+      expect(p.rows.length).toBeLessThanOrEqual(PAGE_SIZE_DEFAULT);
+      seen.push(...p.rows.map((r) => r.idnumber));
+    }
+    expect(seen).toEqual(all.rows.map((r) => r.idnumber));
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("lands on the last page rather than on nothing when the page number runs past the end", async () => {
+    const all = await searchStudents({ by: "name", lastName: "an", pageSize: PAGE_SIZE_DEFAULT }, provider);
+    const far = await searchStudents({ by: "name", lastName: "an", page: 9_999, pageSize: PAGE_SIZE_DEFAULT }, provider);
+    expect(far.page).toBe(all.pageCount);
+    expect(far.rows.length).toBeGreaterThan(0);
+  });
+
+  it("reports one empty page rather than zero pages when nothing matches", async () => {
+    const none = await searchStudents({ by: "name", lastName: "zzqx", pageSize: PAGE_SIZE_DEFAULT }, provider);
+    expect(none.totalRows).toBe(0);
+    expect(none.rows).toEqual([]);
+    expect(none.page).toBe(1);
+    expect(none.pageCount).toBe(1);
   });
 });
 

@@ -50,7 +50,15 @@ export function BioCard({ profile, canReveal, revealHref, hideHref }: { profile:
         <Field label="Account balance" value={formatCurrency(profile.accountBalance)} hint={profile.accountBalance > 0 ? "Debit balance — money owed" : profile.accountBalance < 0 ? "Credit balance — in the student's favour" : undefined} />
         <Field label="Credits Not Posted" value={formatCurrency(profile.cnp)} hint="Aid or payments awarded but not yet applied to the account (tblStudent.CNP)" />
         <Field label="Last Semester" value={profile.lastClearedLabel} />
-        <Field label="Cleared this semester" value={profile.clearedCurrentSession ? "Yes" : "No"} />
+        <Field
+          label={profile.currentTermRecord ? `Cleared for ${profile.lastClearedLabel} (current)` : profile.lastCleared ? `Cleared for ${profile.lastClearedLabel}` : "Clearance flag"}
+          value={profile.clearedCurrentSession ? "Yes" : "No"}
+          hint={
+            profile.clearedCurrentSession && !profile.currentTermRecord
+              ? "This clearance belongs to the semester named above, which is not the current one."
+              : undefined
+          }
+        />
         <Field
           label="Cleared on"
           value={profile.clearedOn ? formatIsoDateSafe(profile.clearedOn) : (profile.clearedOnRaw ?? (profile.clearedCurrentSession ? "Not recorded" : "—"))}

@@ -342,7 +342,6 @@ export class MockDataProvider implements DataProvider {
       classificationCode: s.classificationCode,
       clearedCurrentSession: s.status === "Cleared",
       enrolledCurrentTerm: s.enrolledCurrentTerm,
-      state: !s.enrolledCurrentTerm ? "not-enrolled" : s.status === "Cleared" ? "cleared" : "not-cleared",
     };
   }
 }

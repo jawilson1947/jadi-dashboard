@@ -24,7 +24,9 @@ interface DataTableProps<T> {
   page: number;
   pageSize: number;
   totalRows: number;
-  sort: { field: string; direction: "asc" | "desc" };
+  /** Omit on a table that has no sortable columns: headers render as plain labels and the pager
+   *  links carry no sort params, so the URL promises only what the page actually honours. */
+  sort?: { field: string; direction: "asc" | "desc" };
   /** Href without page/sort params; the table appends them. */
   baseHref: string;
   caption: string;
@@ -33,7 +35,8 @@ interface DataTableProps<T> {
 
 export function DataTable<T extends object>({ rows, columns, rowKey, page, pageSize, totalRows, sort, baseHref, caption, emptyMessage = "No rows." }: DataTableProps<T>) {
   const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
-  const href = (p: number, s = sort.field, d = sort.direction) => `${baseHref}&page=${p}&pageSize=${pageSize}&sort=${s}&direction=${d}`;
+  const href = (p: number, s = sort?.field, d = sort?.direction) =>
+    `${baseHref}&page=${p}&pageSize=${pageSize}${sort ? `&sort=${s}&direction=${d}` : ""}`;
 
   return (
     <div className="card p-0 overflow-hidden paged-table">
@@ -44,19 +47,19 @@ export function DataTable<T extends object>({ rows, columns, rowKey, page, pageS
             <tr>
               {columns.map((c) => {
                 const sortKey = c.sortKey ?? c.key;
-                const active = sort.field === sortKey;
-                const nextDir = active && sort.direction === "asc" ? "desc" : "asc";
+                const active = sort?.field === sortKey;
+                const nextDir = active && sort?.direction === "asc" ? "desc" : "asc";
                 return (
                   <th
                     key={c.key}
                     scope="col"
-                    aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : undefined}
+                    aria-sort={active ? (sort?.direction === "asc" ? "ascending" : "descending") : undefined}
                     className={`px-3 py-2 font-medium text-ink-2 whitespace-nowrap ${c.align === "right" ? "text-right" : ""}`}
                   >
-                    {c.sortable ? (
+                    {c.sortable && sort ? (
                       <Link href={href(1, sortKey, nextDir)} className="inline-flex items-center gap-1 hover:text-ink">
                         {c.label}
-                        <span aria-hidden className="text-ink-3">{active ? (sort.direction === "asc" ? "▲" : "▼") : "⇅"}</span>
+                        <span aria-hidden className="text-ink-3">{active ? (sort?.direction === "asc" ? "▲" : "▼") : "⇅"}</span>
                       </Link>
                     ) : (
                       c.label

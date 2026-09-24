@@ -33,7 +33,7 @@ describe("semester resolver (A-22)", () => {
     const unknown = resolveSemester("ZZ9999", index);
     expect(!unknown.matched && unknown.reason).toBe("unknown");
     expect(semesterLabel("ZZ9999", index)).toBe("ZZ9999 (unknown term)");
-    expect(semesterLabel(NEVER_CLEARED, index)).toBe("Never cleared");
+    expect(semesterLabel(NEVER_CLEARED, index)).toBe("No semester on record");
     // LEAP is not a distinction in a semester label (2026-09-18): both identifiers name one semester.
     expect(semesterLabel("LF2025", index)).toBe("Fall 2025");
     expect(semesterLabel("FA2025", index)).toBe("Fall 2025");

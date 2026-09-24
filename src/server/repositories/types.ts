@@ -211,8 +211,19 @@ export interface StudentSearchQuery {
   limit: number;
 }
 
-/** Row state behind the search-result icon (Bio Spec 1.3 `icon`). Derived, never stored. */
-export type StudentSearchState = "cleared" | "not-cleared" | "not-enrolled";
+/**
+ * Row state behind the search-result icon (Bio Spec 1.3 `icon`). Derived, never stored.
+ *
+ * `ClearedCurrentSession` is a flag ON the `LastCleared` term, not on today's term (J. Wilson,
+ * 2026-09-24 — the column name is misleading). So the flag alone does not mean a student is cleared
+ * now: it means they were cleared for whatever semester `LastCleared` names. `cleared-prior` is that
+ * case, and it is kept distinct from `cleared` rather than folded into it or into `not-cleared`,
+ * because "cleared, but for a semester that has passed" is a different fact from either.
+ *
+ * Derivation needs the current term, which providers do not have, so it happens in
+ * src/server/services/students.ts and nowhere else.
+ */
+export type StudentSearchState = "cleared" | "cleared-prior" | "not-cleared" | "not-enrolled";
 
 /** Bio Spec 1.3 recordset. `[ID]` in the spec is the row key; `icon` is `state` rendered. */
 export interface StudentSearchRow {
@@ -224,9 +235,9 @@ export interface StudentSearchRow {
   lastCleared: TermKey | null;
   accountBalance: number;
   classificationCode: string;
+  /** Cleared FOR the `lastCleared` semester — not necessarily for the current one. */
   clearedCurrentSession: boolean;
   enrolledCurrentTerm: boolean;
-  state: StudentSearchState;
 }
 
 export interface PostalAddress {

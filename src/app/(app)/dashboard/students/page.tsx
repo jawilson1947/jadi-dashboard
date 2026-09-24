@@ -40,7 +40,7 @@ const COLUMNS: Column<DrillDownRow>[] = [
   { key: "classification", label: "Classification", sortable: true, sortKey: "classificationCode" },
   { key: "status", label: "Clearance", sortable: true },
   { key: "accountBalance", label: "Balance", sortable: true, align: "right", render: (r) => formatCurrency(r.accountBalance) },
-  { key: "lastCleared", label: "Last cleared", render: (r) => r.lastCleared ?? "—" },
+  { key: "lastCleared", label: "Last Semester", render: (r) => r.lastCleared ?? "—" },
   { key: "clearedBy", label: "Cleared by", render: (r) => r.clearedBy ?? "—" },
   { key: "email", label: "Email" },
 ];
@@ -53,7 +53,7 @@ const PRINT_COLUMNS: PrintColumn[] = [
   { key: "classification", label: "Classification" },
   { key: "status", label: "Clearance" },
   { key: "accountBalance", label: "Balance", align: "right", format: "currency" },
-  { key: "lastCleared", label: "Last cleared" },
+  { key: "lastCleared", label: "Last Semester" },
   { key: "clearedBy", label: "Cleared by" },
   { key: "email", label: "Email" },
 ];

@@ -396,7 +396,6 @@ function mapSearch(r: RawSearch): StudentSearchRow {
     classificationCode: r.cCode ?? "",
     clearedCurrentSession,
     enrolledCurrentTerm,
-    state: !enrolledCurrentTerm ? "not-enrolled" : clearedCurrentSession ? "cleared" : "not-cleared",
   };
 }
 

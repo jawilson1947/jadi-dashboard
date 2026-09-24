@@ -295,12 +295,12 @@ function ReceivablesSection({
             series={[{ key: "receivable", label: "Debit balances", emphasis: "primary", points: r.rows.map((row, i) => ({ x: i + 1, y: row.positiveBalance })) }]}
             pointLabels={r.rows.map((row) => shortSemester(row.label))}
             title={`Debit balances by ${groupBy === "semester" ? "semester" : "school year"}`}
-            description={`Total owed by students whose last cleared term falls in each ${groupBy === "semester" ? "semester" : "school year"}, oldest first, each point named. Summer terms and unmatched codes are listed below the table rather than plotted.`}
+            description={`Total owed by students whose last semester of record falls in each ${groupBy === "semester" ? "semester" : "school year"}, oldest first, each point named. This groups by the term a student's record sits in, not by whether they were cleared for it. Summer terms and unmatched codes are listed below the table rather than plotted.`}
             height={300}
           />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <caption className="sr-only">Debit balances grouped by last cleared term</caption>
+              <caption className="sr-only">Debit balances grouped by last semester of record</caption>
               <thead className="bg-surface-2 text-left">
                 <tr>
                   {[groupBy === "semester" ? "Semester" : "School year", "Accounts", "Debit balance"].map((h, i) => (
@@ -329,7 +329,7 @@ function ReceivablesSection({
                   <td className="px-3 py-1.5 text-right tabular">{formatCurrency(r.excluded.positiveBalance)}</td>
                 </tr>
                 <tr>
-                  <td className="px-3 py-1.5">Never cleared</td>
+                  <td className="px-3 py-1.5">No semester on record</td>
                   <td className="px-3 py-1.5 text-right tabular">{formatCount(r.neverCleared.students)}</td>
                   <td className="px-3 py-1.5 text-right tabular">{formatCurrency(r.neverCleared.positiveBalance)}</td>
                 </tr>

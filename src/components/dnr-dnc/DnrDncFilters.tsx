@@ -47,7 +47,7 @@ export function DnrDncFilters({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="f-last" className="text-xs text-ink-2">
-          Last cleared semester
+          Last Semester
         </label>
         <select id="f-last" name="lastCleared" defaultValue={current.lastCleared ?? ""} className={field}>
           <option value="">All</option>

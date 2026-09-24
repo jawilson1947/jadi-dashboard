@@ -6,14 +6,19 @@ import Link from "next/link";
  * Plain HTML: no JavaScript is needed to search, every result set is a shareable URL, and the
  * browser remembers what was typed. The guard messages come from the service (one place decides what
  * is too broad a search) and render beside the fields rather than as an error page.
+ *
+ * The page-size control lives in this form so that changing it re-submits the search without a
+ * `page` param — a new page size lands on page 1, which is the only page guaranteed to exist.
  */
 export function StudentSearchForm({
   current,
   minNameLength,
+  pageSizeOptions,
   error,
 }: {
-  current: { by: "name" | "id"; last: string; first: string; id: string };
+  current: { by: "name" | "id"; last: string; first: string; id: string; pageSize: number };
   minNameLength: number;
+  pageSizeOptions: readonly number[];
   error: string | null;
 }) {
   const field = "rounded-md border border-border bg-surface-1 px-3 py-2 text-sm";
@@ -42,6 +47,15 @@ export function StudentSearchForm({
         <div className="flex flex-col gap-1">
           <label htmlFor="s-id" className="text-xs text-ink-2">Student ID</label>
           <input id="s-id" name="id" defaultValue={current.id} inputMode="numeric" className={field} autoComplete="off" />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="s-page-size" className="text-xs text-ink-2">Results per page</label>
+          <select id="s-page-size" name="pageSize" defaultValue={String(current.pageSize)} className={field}>
+            {pageSizeOptions.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
         </div>
 
         <button type="submit" className="rounded-md bg-brand text-brand-ink px-4 py-2 text-sm font-medium">Search</button>

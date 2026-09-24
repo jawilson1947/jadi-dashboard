@@ -39,11 +39,17 @@ export function StudentHeader({ profile, photoHref }: { profile: StudentProfile;
           <dt className="text-ink-3 text-xs">Enrollment</dt>
           <dd className="flex items-center gap-2">
             <StateIcon state={profile.state} />
-            {profile.enrolledCurrentTerm ? (profile.clearedCurrentSession ? "Enrolled, cleared" : "Enrolled, not cleared") : "Not currently enrolled"}
+            {profile.enrolledCurrentTerm
+              ? profile.clearedCurrentSession
+                ? profile.currentTermRecord
+                  ? "Enrolled, cleared for the current semester"
+                  : `Enrolled; cleared for ${profile.lastClearedLabel}, not the current semester`
+                : "Enrolled, not cleared"
+              : "Not currently enrolled"}
           </dd>
         </div>
         <div>
-          <dt className="text-ink-3 text-xs">Last cleared</dt>
+          <dt className="text-ink-3 text-xs">Last Semester</dt>
           <dd>{profile.lastClearedLabel}</dd>
         </div>
         <div>

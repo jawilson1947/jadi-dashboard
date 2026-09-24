@@ -39,7 +39,7 @@ export const POST = handle(async (req, { correlationId }) => {
   const rows: Row[] = [
     ...r.rows.map((x) => ({ label: x.label, students: x.students, positiveBalance: x.positiveBalance })),
     { label: "Excluded terms (summer)", students: r.excluded.students, positiveBalance: r.excluded.positiveBalance },
-    { label: "Never cleared", students: r.neverCleared.students, positiveBalance: r.neverCleared.positiveBalance },
+    { label: "No semester on record", students: r.neverCleared.students, positiveBalance: r.neverCleared.positiveBalance },
     { label: "Unmatched term codes", students: r.unknown.students, positiveBalance: r.unknown.positiveBalance },
     { label: "Total", students: r.totalStudents, positiveBalance: r.total },
   ];
