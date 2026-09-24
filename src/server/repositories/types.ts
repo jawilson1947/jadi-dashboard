@@ -248,13 +248,19 @@ export interface StudentBio extends StudentSearchRow {
   /** ISO date (YYYY-MM-DD) or null. The only masked field on this card (A-29). */
   dob: string | null;
   /**
-   * tblStudent.CNP — a `money` column, NOT an identifier (discovery, ousadb-discovery-2026-09-17).
-   * Carried as a number and rendered as currency; what it means is open (A-29).
+   * tblStudent.CNP — "Credits Not Posted" (J. Wilson, 2026-09-24): aid or payments awarded but not
+   * yet applied to the account. A `money` column, NOT an identifier, so it is never masked.
    */
   cnp: number | null;
   address: PostalAddress;
-  /** tblStudent.clearedon, stored YYYYMMDD; parsed to ISO by the provider. */
+  /** tblStudent.ClearedOn, stored YYYYMMDD; parsed to ISO by the provider. */
   clearedOn: string | null;
+  /**
+   * The column's raw text when it held something the YYYYMMDD rule could not parse. A varchar date
+   * column will eventually hold a surprise, and a silently blank field is the worst way to find out:
+   * the card shows the raw value and says it was not recognised.
+   */
+  clearedOnRaw: string | null;
 }
 
 /** One trans_hist row. `sourceCode` is raw; labels come from Setting.transactionSourceLabels (A-28). */
@@ -277,13 +283,23 @@ export interface WorksheetItemRow {
   sourceCode: string | null;
 }
 
-/** dbo.fn_CostAnalysis columns (A-8, D-2). Names follow the function's own columns. */
+/**
+ * The five figures dbo.fn_CostAnalysis returns for one student (A-8, D-2), plus the two inputs it
+ * was given. The inputs travel with the answer deliberately: "you must pay $X to clear" is a number
+ * somebody will be asked to justify, and the charges and credits it came from are the justification.
+ */
 export interface CostAnalysisRow {
+  /** 80% of charges ('S'). */
   eighty: number;
+  /** Balance + (charges − credits) ('T'). */
   amtdue: number;
+  /** Amount needed to clear ('D'). */
   needed: number;
+  /** Remainder financed ('L'), and that loan divided by five ('P'). */
   loan: number;
   payment: number;
+  charges: number;
+  credits: number;
 }
 
 export interface DataProvider {

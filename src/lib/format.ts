@@ -56,13 +56,42 @@ export function maskDob(iso: string | null | undefined): string {
   return `${iso.slice(0, 4)} (year only)`;
 }
 
-/** Bio Spec 1.3: clearedon is stored as YYYYMMDD. Returns an ISO date, or null when unparseable. */
+/**
+ * Bio Spec 1.3: `clearedon` is documented as YYYYMMDD, but the column is `varchar(50)` — and a free-text
+ * date column collects shapes over the years. Rather than show a blank for anything that is not
+ * exactly eight digits, this reads the forms that actually turn up in such a column:
+ *
+ *   20260715 · 20260806110107.143 · 2026-07-15 · 2026/07/15 · 07/15/2026 · 7/15/2026
+ *   and any of these with a time after them
+ *
+ * The second of those is what staging actually holds (confirmed 2026-09-24 on idnumber 181083):
+ * YYYYMMDDhhmmss.fff run together, with no separator to split a time off. Only the date part is
+ * shown — the card answers "which day was this student cleared", not the millisecond.
+ *
+ * Anything else still returns null, and the caller shows the raw text rather than hiding it, so an
+ * unrecognised value is visible instead of looking like an empty field.
+ */
 export function parseCompactDate(value: string | null | undefined): string | null {
   if (!value) return null;
-  const v = value.trim();
-  if (!/^\d{8}$/.test(v)) return null;
-  const iso = `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
-  return Number.isNaN(Date.parse(`${iso}T00:00:00Z`)) ? null : iso;
+  // Take the date part: everything before the first space or "T" (a time component is not a date).
+  const v = value.trim().split(/[ T]/)[0];
+  if (v === "") return null;
+
+  const build = (y: number, m: number, d: number): string | null => {
+    if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+    const iso = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const parsed = new Date(`${iso}T00:00:00Z`);
+    // Reject a date that does not exist (31 February rolls over rather than failing to parse).
+    return Number.isNaN(parsed.getTime()) || parsed.getUTCDate() !== d ? null : iso;
+  };
+
+  let m: RegExpExecArray | null;
+  // All digits: 8 for a date, optionally followed by a run-together time (hhmm, hhmmss, .fff).
+  if ((m = /^(\d{4})(\d{2})(\d{2})(?:\d{2,6})?(?:\.\d+)?$/.exec(v))) return build(+m[1], +m[2], +m[3]);
+  if ((m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(v))) return build(+m[1], +m[2], +m[3]);
+  // US order, which is what the Bio Spec's own substring expression renders: MM/DD/YYYY.
+  if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(v))) return build(+m[3], +m[1], +m[2]);
+  return null;
 }
 
 /** ISO date for display, or an em dash. Parsed as a calendar date so it cannot shift a day. */

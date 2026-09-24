@@ -27,6 +27,12 @@ export function ClearanceCard({ analysis }: { analysis: ClearanceAnalysis }) {
               Computed by the institution&apos;s cost analysis (the 80% rule), not by this application.
               {analysis.costAnalysis ? ` Payment plan: ${formatCurrency(analysis.costAnalysis.payment)} · loan ${formatCurrency(analysis.costAnalysis.loan)}.` : ""}
             </p>
+            {analysis.costAnalysis ? (
+              <p className="text-xs text-ink-3 mt-1">
+                From charges of {formatCurrency(analysis.costAnalysis.charges)} against credits of {formatCurrency(analysis.costAnalysis.credits)} this term, with 80% of charges at{" "}
+                {formatCurrency(analysis.costAnalysis.eighty)}. Anyone asked to pay this figure is entitled to see where it came from.
+              </p>
+            ) : null}
           </>
         ) : analysis.status === "no-amount-outstanding" ? (
           <p className="text-sm mt-1">No amount outstanding for clearance — the worksheet nets to a credit.</p>

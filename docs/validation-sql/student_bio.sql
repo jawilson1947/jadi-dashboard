@@ -8,6 +8,12 @@
 --   * the global statement names the linked server from configuration and is refused unless
 --     TRANS_HIST_GLOBAL_ENABLED is set, because A-24 has not confirmed that host is non-production
 
+-- FORMAT NOTE (2026-09-24): tblStudent.ClearedOn is varchar(50) and holds a run-together
+-- timestamp, not a bare date — e.g. idnumber 181083 (pid 1920556) = '20260806110107.143'
+-- (YYYYMMDDhhmmss.fff). The Bio Spec's substring(clearedon,5,2)+'/'+... expression still yields the
+-- right MM/DD/YYYY because it reads only the first eight characters. The application parses the
+-- date part and ignores the time; an unrecognised value is displayed raw rather than as a blank.
+
 -- 1.1 Search by last and first name
 --     like <%lastname%> and like <%firstname%>
 
@@ -49,3 +55,20 @@ EXEC dbo.Sp_GetFCWorksheetItems
 -- 1.5.5 itself. The formula above is implemented as a TEST ORACLE only
 -- (docFormulaNeeded in src/server/services/clearance-analysis.ts); a divergence on real data is a
 -- validation defect to be signed off, not something to reconcile silently on screen.
+
+-- fn_CostAnalysis (A-8, FINDINGS Sec.8.5) — the authority for 1.5.4/1.5.5 under D-2.
+-- It is a SCALAR function, not table-valued:
+--   dbo.fn_CostAnalysis(@what char(1), @balance numeric(12,2), @charges numeric(12,2), @credits numeric(12,2))
+--   'S' 80% of charges · 'T' amount due · 'D' amount needed to clear · 'L' loan · 'P' payment · 'C' net cost
+-- VIEW_OURM_FCA calls it five times per row with (AccountBalance, VIEW_OURM_CHARGES.Charges,
+-- VIEW_OURM_CREDITS.credits). The application makes the same five calls for ONE student:
+SELECT
+  eighty  = dbo.fn_CostAnalysis('S', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  amtdue  = dbo.fn_CostAnalysis('T', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  needed  = dbo.fn_CostAnalysis('D', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  loan    = dbo.fn_CostAnalysis('L', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  payment = dbo.fn_CostAnalysis('P', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0))
+FROM dbo.tblStudent S
+LEFT JOIN dbo.VIEW_OURM_CHARGES CH ON CH.idnumber = S.idnumber
+LEFT JOIN dbo.VIEW_OURM_CREDITS CR ON CR.idnumber = S.idnumber
+WHERE S.idnumber = <idnumber>;

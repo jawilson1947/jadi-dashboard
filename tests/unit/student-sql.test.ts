@@ -45,7 +45,14 @@ describe("student SQL guardrails (Spec §15, §18)", () => {
     expect(QS.globalTransactions(LINKED)).toMatch(/ID_NUM = @id/);
     expect(QS.worksheetItems).toMatch(/@ID_NUM = @id/);
     expect(QS.worksheetItems).toMatch(/@DropClassesDate = @dropDate/);
-    expect(QS.costAnalysis).toMatch(/fn_CostAnalysis\(@id\)/);
+    // fn_CostAnalysis is SCALAR — (@what, @balance, @charges, @credits) — and is called the way
+    // VIEW_OURM_FCA itself calls it. Calling it as a table-valued function keyed on an id is the
+    // mistake this assertion exists to catch (SQL Server reports "Invalid object name").
+    expect(QS.costAnalysis).not.toMatch(/FROM\s+dbo\.fn_CostAnalysis/i);
+    expect(QS.costAnalysis).toMatch(/S\.idnumber = @id/);
+    for (const what of ["S", "T", "D", "L", "P"]) {
+      expect(QS.costAnalysis, `missing fn_CostAnalysis('${what}', ...)`).toContain(`dbo.fn_CostAnalysis('${what}', S.AccountBalance`);
+    }
   });
 
   it("pairs every LIKE with an ESCAPE clause so a wildcard in a name is literal", () => {

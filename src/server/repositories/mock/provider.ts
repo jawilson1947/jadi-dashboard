@@ -275,6 +275,7 @@ export class MockDataProvider implements DataProvider {
       cnp: bio?.cnp ?? null,
       address: bio?.address ?? { address: null, city: null, stateCode: null, zipCode: null, country: null },
       clearedOn: bio?.clearedOn ?? null,
+      clearedOnRaw: null,
     };
   }
 
@@ -298,19 +299,33 @@ export class MockDataProvider implements DataProvider {
   }
 
   /**
-   * A-8 / D-2 — the institution's fn_CostAnalysis. The mock reproduces its documented shape (the 80%
-   * rule and loan / 5) so the equivalence test has something to compare; the real numbers come from
-   * the function itself, never from this arithmetic.
+   * A-8 / D-2 — the institution's fn_CostAnalysis, reproduced from its published source
+   * (FINDINGS §8.5, function dated 2013, "eighty" fixed to 80% in 2023):
+   *
+   *   cost   = charges − credits          amtdue = balance + cost          eighty = charges × 0.8
+   *   when amtdue > 0:
+   *     credits > eighty + balance  →  nothing to clear; the whole amount due is financed
+   *     otherwise                   →  needed = eighty + (balance − credits); loan = amtdue − needed
+   *   payment = loan ÷ 5;  when amtdue ≤ 0 every figure is zero
+   *
+   * Reproducing it here rather than approximating it is what makes the D-2 equivalence test
+   * meaningful: on real data the figures come from the function itself, never from this arithmetic.
    */
   async getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null> {
     const s = this.data.students.find((r) => r.idnumber === id);
     if (!s) return null;
-    const items = await this.getClearanceWorksheetItems(id, "");
-    const net = round2(items.reduce((t, r) => t + r.amount, 0));
-    const amtdue = round2(s.accountBalance + net);
-    const eighty = round2(amtdue * 0.8);
-    const needed = round2(Math.max(0, eighty));
-    return { eighty, amtdue, needed, loan: round2(needed / 5), payment: round2(needed / 5) };
+    const rows = await this.getStudentTransactions(id, "current");
+    const charges = round2(rows.filter((r) => r.amount > 0).reduce((t, r) => t + r.amount, 0));
+    const credits = round2(rows.filter((r) => r.amount < 0).reduce((t, r) => t + Math.abs(r.amount), 0));
+    const balance = s.accountBalance;
+
+    const amtdue = round2(balance + (charges - credits));
+    if (amtdue <= 0) return { eighty: 0, amtdue: 0, needed: 0, loan: 0, payment: 0, charges, credits };
+
+    const eighty = round2(charges * 0.8);
+    const needed = credits > eighty + balance ? 0 : round2(eighty + (balance - credits));
+    const loan = round2(amtdue - needed);
+    return { eighty, amtdue, needed, loan, payment: round2(loan / 5), charges, credits };
   }
 
   /** Bio Spec 1.3 recordset shape, shared by search and the bio card so the two cannot disagree. */

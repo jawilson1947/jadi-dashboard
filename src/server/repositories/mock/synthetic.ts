@@ -205,7 +205,15 @@ function generateBio(s: StudentRow): SyntheticBio {
       zipCode,
       country: "US",
     },
-    clearedOn: s.clearedAt ? s.clearedAt.toISOString().slice(0, 10) : null,
+    // tblStudent.ClearedOn is set whenever the record was cleared — including in an earlier term,
+    // where no dated action survives in the current-term views. Without this, every student cleared
+    // in a past semester showed "Cleared: Yes" beside an empty date, which is not what the real
+    // column looks like. Blank stays blank only for records that were never cleared.
+    clearedOn: s.clearedAt
+      ? s.clearedAt.toISOString().slice(0, 10)
+      : s.status === "Cleared" && s.lastCleared && s.lastCleared !== "XX0000"
+        ? priorTermClearanceDate(s.lastCleared, rnd)
+        : null,
   };
 }
 
@@ -255,4 +263,19 @@ export function generateTransactions(s: StudentRow, scope: "current" | "global",
     });
   }
   return rows.sort((a, b) => b.postedOn.localeCompare(a.postedOn));
+}
+
+/**
+ * A plausible clearance date inside the term named by a LastCleared code (FA2026 / SP2026 / LF2026 …).
+ * Synthetic only: the real column carries the institution's own date.
+ */
+function priorTermClearanceDate(termKey: string, rnd: () => number): string | null {
+  const m = /^([A-Z]{2})(\d{4})$/.exec(termKey.toUpperCase());
+  if (!m) return null;
+  const [, season, year] = m;
+  // Fall terms (FA/LF) clear from June; Spring terms (SP/LS) from November of the prior year.
+  const startsInFall = season === "FA" || season === "LF";
+  const base = startsInFall ? new Date(Date.UTC(Number(year), 5, 1)) : new Date(Date.UTC(Number(year) - 1, 10, 1));
+  const at = new Date(base.getTime() + Math.floor(rnd() * 70) * 86400000);
+  return at.toISOString().slice(0, 10);
 }

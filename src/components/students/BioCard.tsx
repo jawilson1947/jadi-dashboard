@@ -10,8 +10,8 @@ import { formatCurrency, formatIsoDateSafe } from "@/lib/format";
  * toggle, because it is an audited act — and the control says so, so nobody is surprised later.
  *
  * CNP is a `money` column on tblStudent (discovery 2026-09-17), not an identifier, so it is rendered
- * as currency. What it represents is still open (A-29) and the card labels it as unexplained rather
- * than guessing.
+ * as currency. It stands for Credits Not Posted (J. Wilson, 2026-09-24) — aid or payments awarded
+ * but not yet applied — and the card uses that name rather than the column name.
  */
 export function BioCard({ profile, canReveal, revealHref, hideHref }: { profile: StudentProfile; canReveal: boolean; revealHref: string; hideHref: string }) {
   const a = profile.address;
@@ -48,10 +48,14 @@ export function BioCard({ profile, canReveal, revealHref, hideHref }: { profile:
         </div>
 
         <Field label="Account balance" value={formatCurrency(profile.accountBalance)} hint={profile.accountBalance > 0 ? "Debit balance — money owed" : profile.accountBalance < 0 ? "Credit balance — in the student's favour" : undefined} />
-        <Field label="CNP" value={formatCurrency(profile.cnp)} hint="Source column tblStudent.CNP — meaning not yet confirmed (A-29)" />
-        <Field label="Last cleared" value={profile.lastClearedLabel} />
-        <Field label="Cleared this session" value={profile.clearedCurrentSession ? "Yes" : "No"} />
-        <Field label="Cleared on" value={formatIsoDateSafe(profile.clearedOn)} />
+        <Field label="Credits Not Posted" value={formatCurrency(profile.cnp)} hint="Aid or payments awarded but not yet applied to the account (tblStudent.CNP)" />
+        <Field label="Last Semester" value={profile.lastClearedLabel} />
+        <Field label="Cleared this semester" value={profile.clearedCurrentSession ? "Yes" : "No"} />
+        <Field
+          label="Cleared on"
+          value={profile.clearedOn ? formatIsoDateSafe(profile.clearedOn) : (profile.clearedOnRaw ?? (profile.clearedCurrentSession ? "Not recorded" : "—"))}
+          hint={profile.clearedOnRaw ? "Stored in an unrecognised format — shown as it appears in the source column" : undefined}
+        />
       </dl>
     </section>
   );

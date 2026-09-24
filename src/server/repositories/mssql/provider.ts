@@ -257,6 +257,7 @@ export class MssqlDataProvider implements DataProvider {
       cnp: row.CNP === null || row.CNP === undefined ? null : money(row.CNP),
       address: { address: row.Address, city: row.City, stateCode: row.StateCode, zipCode: row.zipcode, country: row.Country },
       clearedOn: parseCompactDate(row.ClearedOn),
+      clearedOnRaw: parseCompactDate(row.ClearedOn) === null && (row.ClearedOn ?? "").trim() !== "" ? (row.ClearedOn ?? "").trim() : null,
     };
   }
 
@@ -292,10 +293,27 @@ export class MssqlDataProvider implements DataProvider {
   }
 
   async getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null> {
-    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawCostAnalysis>(QS.costAnalysis);
-    const row = r.recordset[0];
-    if (!row) return null;
-    return { eighty: money(row.eighty), amtdue: money(row.amtdue), needed: money(row.needed), loan: money(row.loan), payment: money(row.payment) };
+    try {
+      const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawCostAnalysis>(QS.costAnalysis);
+      const row = r.recordset[0];
+      if (!row) return null;
+      return {
+        eighty: money(row.eighty),
+        amtdue: money(row.amtdue),
+        needed: money(row.needed),
+        loan: money(row.loan),
+        payment: money(row.payment),
+        charges: money(row.charges),
+        credits: money(row.credits),
+      };
+    } catch (err) {
+      // The rest of the clearance card — worksheet items, net amount, total monies due — is still
+      // correct without this, and the card has an explicit "cannot be stated" state for exactly this
+      // case. Returning null shows that state instead of replacing the whole page with an error.
+      // The failure is logged rather than swallowed: a missing function is a deployment problem.
+      console.error(JSON.stringify({ level: "error", msg: "fn_CostAnalysis unavailable", student: id, error: err instanceof Error ? err.message : String(err) }));
+      return null;
+    }
   }
 
   /** Convenience for tests/health: confirms the current/previous term rows resolve. */
@@ -362,7 +380,7 @@ interface RawTransaction {
 /** Sp_GetFCWorksheetItems returns trans_hist-shaped rows; the alias documents where they come from. */
 type RawWorksheetItem = RawTransaction;
 
-interface RawCostAnalysis { eighty: number | null; amtdue: number | null; needed: number | null; loan: number | null; payment: number | null; }
+interface RawCostAnalysis { eighty: number | null; amtdue: number | null; needed: number | null; loan: number | null; payment: number | null; charges: number | null; credits: number | null; }
 
 function mapSearch(r: RawSearch): StudentSearchRow {
   const enrolledCurrentTerm = Boolean(r.enrolled);

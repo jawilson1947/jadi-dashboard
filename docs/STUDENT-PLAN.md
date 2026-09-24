@@ -43,7 +43,7 @@ here and mirrored as new rows A-24 … A-27 in `ASSUMPTIONS.md`.
 | **D-1** | Transaction history source | **Two sources as written.** Current-semester card reads `jadi.dbo.trans_hist` (co-located). Global card reads the `TMSEPRD` linked server. Both are implemented; the linked-server path stays behind a config flag and is **not executed against staging** until open question #6 confirms that `172.18.96.11` is not production. |
 | **D-2** | The 80% clearance rule | **`dbo.fn_CostAnalysis` is authoritative** (consistent with A-8). The Bio Spec's inline formula is treated as a paraphrase. The literal formula is implemented *as a test oracle only*: a unit test asserts the two agree on fixtures, and any divergence on real data is reported as a validation defect, not rendered to users. |
 | **D-3** | AI collection notice | **Built in Phase 5** (sub-phase 5f), behind the global AI kill switch and a new `ai.notice.create` permission. Because a collection notice necessarily carries the student's name, ID and balance, this is the first path in the application that sends **identified** data to an external model — it ships disabled and A-13 must be signed before it is enabled anywhere but mock mode. |
-| **D-4** | Bio field exposure | Every field on the bio card is visible to `student.view` — **except the date of birth**, which requires the new `student.pii.view` grant and is masked to the birth year by default. (CNP was to be masked too, until the schema showed `tblStudent.CNP` is a `money` column rather than an identifier; it is rendered as currency and labelled as unexplained.) Contact fields (email, phone, home address) are `student.view`. The photo is in scope, served by an authenticated route and audited. ⚠️ *The answer selected both "masked + permissioned" and "all fields to student.view"; this is the reconciliation — one line of confirmation would close it.* |
+| **D-4** | Bio field exposure | Every field on the bio card is visible to `student.view` — **except the date of birth**, which requires the new `student.pii.view` grant and is masked to the birth year by default. (CNP was to be masked too, until the schema showed `tblStudent.CNP` is a `money` column rather than an identifier. It is "Credits Not Posted" — aid or payments awarded but not yet applied — confirmed 2026-09-24, and renders as currency under that name.) Contact fields (email, phone, home address) are `student.view`. The photo is in scope, served by an authenticated route and audited. ⚠️ *The answer selected both "masked + permissioned" and "all fields to student.view"; this is the reconciliation — one line of confirmation would close it.* |
 
 ---
 
@@ -240,7 +240,7 @@ clearance state, balance in A-5 vocabulary ("debit balance" / "credit balance").
 - **Bio** — the Bio Spec 1.3 data form. The date of birth renders as `1998 (year only)` with a
   **Reveal** control for holders of `student.pii.view`; the control is labelled "Reveal (recorded)"
   and revealing writes `student.pii.reveal` to the audit log, so it is honest about being watched.
-  CNP renders as currency with its source column named, since what it means is still open.
+  CNP renders as currency under its real name, Credits Not Posted.
 - **Transactions** — *Current Semester* card (present only when the eligibility rule holds), then
   *Global History* with year-grouped pagination (Bio Spec 2.1): a year selector plus a page within
   the year, so a 15-year history is navigable rather than an infinite scroll.

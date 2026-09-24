@@ -95,11 +95,30 @@ ORDER BY TRANS_DTE DESC;`,
   worksheetItems: `EXEC dbo.Sp_GetFCWorksheetItems @ID_NUM = @id, @DropClassesDate = @dropDate;`,
 
   /**
-   * A-8 / D-2 — the institution's cost analysis is authoritative for the 80% rule. Column names are
-   * the function's own. A student with no row yields no row, which the service renders as "not
-   * available" rather than as zero.
+   * A-8 / D-2 — the institution's cost analysis is authoritative for the 80% rule.
+   *
+   * `fn_CostAnalysis` is a SCALAR function taking (@what, @balance, @charges, @credits) and
+   * returning one figure per call — not a table-valued function keyed on a student. This mirrors
+   * exactly how VIEW_OURM_FCA itself calls it (discovery 2026-09-17, FINDINGS §8.5), for ONE
+   * student, so the figures on the profile are the same ones the FCA drill-down shows:
+   *   'S' = 80% of charges · 'T' = amount due · 'D' = amount needed to clear · 'L' = loan · 'P' = payment
+   *
+   * Charges and credits come from the per-student views the function expects. FCA joins those same
+   * views; querying them for a single id is fast, where scanning FCA itself takes 40–120 s.
+   * A student with no charges and no credits still returns a row (ISNULL → 0), which is the
+   * function's own convention: it answers zero rather than declining to answer.
    */
   costAnalysis: `
-SELECT TOP (1) eighty, amtdue, needed, Loan AS loan, payment
-FROM dbo.fn_CostAnalysis(@id);`,
+SELECT TOP (1)
+  eighty  = dbo.fn_CostAnalysis('S', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  amtdue  = dbo.fn_CostAnalysis('T', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  needed  = dbo.fn_CostAnalysis('D', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  loan    = dbo.fn_CostAnalysis('L', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  payment = dbo.fn_CostAnalysis('P', S.AccountBalance, ISNULL(CH.Charges, 0), ISNULL(CR.credits, 0)),
+  charges = ISNULL(CH.Charges, 0),
+  credits = ISNULL(CR.credits, 0)
+FROM dbo.tblStudent S
+LEFT JOIN dbo.VIEW_OURM_CHARGES CH ON CH.idnumber = S.idnumber
+LEFT JOIN dbo.VIEW_OURM_CREDITS CR ON CR.idnumber = S.idnumber
+WHERE S.idnumber = @id;`,
 } as const;
