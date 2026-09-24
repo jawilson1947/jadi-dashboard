@@ -63,7 +63,12 @@ function shortSemester(label: string): string {
   return label.replace(/\b(\d{2})(\d{2})\b/, "$2").trim();
 }
 
-/** The two full-record trends (census, financially cleared) — the whole history, not the picked range. */
+/**
+ * The two full-record trends (census, financially cleared) — the whole history, not the picked range.
+ * Each gets its own full-width card, stacked with Census first (2026-09-24, Jim): side by side, each
+ * chart had half the horizontal room for every semester on record, which is exactly the axis that
+ * needs the space.
+ */
 function TrendCharts({ series }: { series: TermSeriesPoint[] }) {
   if (series.length === 0) {
     return (
@@ -83,7 +88,7 @@ function TrendCharts({ series }: { series: TermSeriesPoint[] }) {
   ] as const;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2 print-stack">
+    <div className="space-y-4 print-stack">
       {charts.map((c) => (
         <section key={c.key} className="card space-y-2">
           <h2 className="text-sm font-medium text-ink-2">{c.heading} — every semester on record</h2>

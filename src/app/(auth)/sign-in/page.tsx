@@ -1,13 +1,10 @@
-import { getConfig } from "@/server/db/config";
-import { DEV_USERS } from "@/server/auth/dev-users";
-import { DevSignInForm } from "./DevSignInForm";
+import { PublicFooter } from "@/components/layout/PublicFooter";
 import { SignInForm } from "./SignInForm";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
-  const devLogin = getConfig().AUTH_DEV_LOGIN;
   const { next } = await searchParams;
   return (
     <main className="flex-1 grid place-items-center p-6">
@@ -21,19 +18,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
         </div>
 
         <SignInForm next={next} />
-
-        <button
-          type="button"
-          disabled
-          className="mt-5 w-full rounded-md border border-border py-2 text-sm text-ink-3 opacity-70 cursor-not-allowed"
-          title="Institutional single sign-on is configured in Phase 9 (ASSUMPTIONS A-12)"
-        >
-          Sign in with institutional account (coming later)
-        </button>
-
-        {devLogin ? (
-          <DevSignInForm users={DEV_USERS.map((u) => ({ username: u.username, displayName: u.displayName, roles: u.roles }))} />
-        ) : null}
+        <PublicFooter />
       </div>
     </main>
   );
