@@ -196,6 +196,96 @@ export interface ReceivableByTermRow {
   positiveBalance: number;
 }
 
+/* ─────────────────────────── Phase 5 — Student subsystem (Bio Spec) ─────────────────────────── */
+
+/**
+ * Bio Spec 1.1-1.2. Exactly two shapes of search; both are bounded and neither accepts a bare
+ * wildcard. The provider receives already-validated values — escaping of LIKE metacharacters
+ * happens in the service, so no provider can forget it.
+ */
+export interface StudentSearchQuery {
+  by: "name" | "id";
+  lastName?: string;
+  firstName?: string;
+  idnumber?: string;
+  limit: number;
+}
+
+/** Row state behind the search-result icon (Bio Spec 1.3 `icon`). Derived, never stored. */
+export type StudentSearchState = "cleared" | "not-cleared" | "not-enrolled";
+
+/** Bio Spec 1.3 recordset. `[ID]` in the spec is the row key; `icon` is `state` rendered. */
+export interface StudentSearchRow {
+  idnumber: StudentKey;
+  lastName: string;
+  firstName: string;
+  email: string;
+  phone: string | null;
+  lastCleared: TermKey | null;
+  accountBalance: number;
+  classificationCode: string;
+  clearedCurrentSession: boolean;
+  enrolledCurrentTerm: boolean;
+  state: StudentSearchState;
+}
+
+export interface PostalAddress {
+  address: string | null;
+  city: string | null;
+  stateCode: string | null;
+  zipCode: string | null;
+  country: string | null;
+}
+
+/**
+ * Bio Spec 1.3 data form. Providers return RAW values; masking of `dob` (A-29) and of
+ * `pid` (A-3) is applied in src/server/services/students.ts before anything leaves the server, so an
+ * unprivileged response never carries the real value at all.
+ */
+export interface StudentBio extends StudentSearchRow {
+  middleName: string | null;
+  pid: string;
+  /** ISO date (YYYY-MM-DD) or null. The only masked field on this card (A-29). */
+  dob: string | null;
+  /**
+   * tblStudent.CNP — a `money` column, NOT an identifier (discovery, ousadb-discovery-2026-09-17).
+   * Carried as a number and rendered as currency; what it means is open (A-29).
+   */
+  cnp: number | null;
+  address: PostalAddress;
+  /** tblStudent.clearedon, stored YYYYMMDD; parsed to ISO by the provider. */
+  clearedOn: string | null;
+}
+
+/** One trans_hist row. `sourceCode` is raw; labels come from Setting.transactionSourceLabels (A-28). */
+export interface TransactionRow {
+  postedOn: string; // ISO date
+  description: string;
+  /** TRANS_AMT. Negative = credit (money in the student's favour), positive = debit (A-5). */
+  amount: number;
+  sourceCode: string;
+}
+
+/** Which trans_hist source a transaction request targets (A-24, D-1). */
+export type TransactionScope = "current" | "global";
+
+/** Bio Spec 1.5.1 — one row of the Sp_GetFCWorksheetItems recordset. */
+export interface WorksheetItemRow {
+  description: string;
+  amount: number;
+  postedOn: string | null;
+  sourceCode: string | null;
+}
+
+/** dbo.fn_CostAnalysis columns (A-8, D-2). Names follow the function's own columns. */
+export interface CostAnalysisRow {
+  eighty: number;
+  amtdue: number;
+  needed: number;
+  loan: number;
+  payment: number;
+}
+
 export interface DataProvider {
   readonly name: SourceInfo["provider"];
   getSourceInfo(): Promise<SourceInfo>;
@@ -228,6 +318,22 @@ export interface DataProvider {
   getReceivablesByTerm(): Promise<ReceivableByTermRow[]>;
   /** Students behind a sprint cell — a day, an operator, or a classification (Spec §7.1–7.3 drill-downs). */
   getSprintStudents(filter: SprintStudentFilter, page: PageRequest): Promise<Page<StudentRow>>;
+
+  /* ── Phase 5 — Student subsystem (Bio Spec) ── */
+  /** Bio Spec 1.1–1.2. Bounded by `limit`; the service has already validated and escaped the terms. */
+  searchStudents(query: StudentSearchQuery): Promise<StudentSearchRow[]>;
+  /** Bio Spec 1.3. Raw values — the service masks dob and pid before responding (A-3, A-29). */
+  getStudentBio(id: StudentKey): Promise<StudentBio | null>;
+  /**
+   * Bio Spec 2. `current` reads the co-located jadi.dbo.trans_hist; `global` reads the TMSEPRD
+   * linked server and throws DataSourceUnavailableError until A-24 is confirmed and the path is
+   * explicitly enabled. Newest first; the service groups by year and paginates (Bio Spec 2.1).
+   */
+  getStudentTransactions(id: StudentKey, scope: TransactionScope): Promise<TransactionRow[]>;
+  /** Bio Spec 1.5.1 — EXEC dbo.Sp_GetFCWorksheetItems @ID_NUM, @DropClassesDate. */
+  getClearanceWorksheetItems(id: StudentKey, dropClassesDate: string): Promise<WorksheetItemRow[]>;
+  /** A-8 / D-2 — dbo.fn_CostAnalysis for one student; null when the student has no row. */
+  getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null>;
 }
 
 /** Thrown by a provider when the underlying source cannot be reached or is misconfigured. */

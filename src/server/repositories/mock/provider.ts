@@ -19,12 +19,20 @@ import type {
   PageRequest,
   ReceivableSummary,
   SourceInfo,
+  StudentBio,
   StudentRow,
+  StudentSearchQuery,
+  StudentSearchRow,
+  StudentKey,
   TermKey,
   TermMetadata,
+  TransactionRow,
+  TransactionScope,
+  WorksheetItemRow,
+  CostAnalysisRow,
 } from "../types";
 import { resolveTerms } from "../types";
-import { generateSyntheticDataset, type SyntheticDataset } from "./synthetic";
+import { generateSyntheticDataset, generateTransactions, type SyntheticDataset } from "./synthetic";
 
 /**
  * Mock DataProvider. Implements the SAME definitions as the mssql provider (A-1, A-2):
@@ -239,6 +247,88 @@ export class MockDataProvider implements DataProvider {
         // LastCleared = previous term AND ClearedCurrentSession = 1 AND AccountBalance > 0 AND NOT EXISTS (VIEW_OURM)
         return this.dnrCandidates().filter((s) => !s.enrolledCurrentTerm);
     }
+  }
+  /* ── Phase 5 — Student subsystem (Bio Spec) ── */
+
+  /** Bio Spec 1.1–1.2. The service has already rejected empty/wildcard-only terms and escaped LIKE metacharacters. */
+  async searchStudents(query: StudentSearchQuery): Promise<StudentSearchRow[]> {
+    const contains = (haystack: string, needle?: string) => needle === undefined || haystack.toLowerCase().includes(needle.toLowerCase());
+    const matches = this.data.students.filter((s) => {
+      if (query.by === "id") return query.idnumber !== undefined && s.idnumber.startsWith(query.idnumber);
+      return contains(s.lastName, query.lastName) && contains(s.firstName, query.firstName);
+    });
+    return matches
+      .sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName) || a.idnumber.localeCompare(b.idnumber))
+      .slice(0, query.limit)
+      .map((s) => this.searchRow(s));
+  }
+
+  async getStudentBio(id: StudentKey): Promise<StudentBio | null> {
+    const s = this.data.students.find((r) => r.idnumber === id);
+    if (!s) return null;
+    const bio = this.data.bios.get(id);
+    return {
+      ...this.searchRow(s),
+      middleName: s.middleName,
+      pid: s.pid,
+      dob: bio?.dob ?? null,
+      cnp: bio?.cnp ?? null,
+      address: bio?.address ?? { address: null, city: null, stateCode: null, zipCode: null, country: null },
+      clearedOn: bio?.clearedOn ?? null,
+    };
+  }
+
+  /** Bio Spec 2. Both scopes are generated here; the real provider reads two different servers (D-1). */
+  async getStudentTransactions(id: StudentKey, scope: TransactionScope): Promise<TransactionRow[]> {
+    const s = this.data.students.find((r) => r.idnumber === id);
+    if (!s) return [];
+    const { current } = this.terms();
+    return generateTransactions(s, scope, current.semesterBegins);
+  }
+
+  /**
+   * Bio Spec 1.5.1. The sproc returns the items still outstanding for the term; the mock derives them
+   * from the current-term transactions so the net amount the clearance card computes is consistent
+   * with the transactions card the user can see beside it.
+   */
+  async getClearanceWorksheetItems(id: StudentKey, _dropClassesDate: string): Promise<WorksheetItemRow[]> {
+    void _dropClassesDate;
+    const rows = await this.getStudentTransactions(id, "current");
+    return rows.map((r) => ({ description: r.description, amount: r.amount, postedOn: r.postedOn, sourceCode: r.sourceCode }));
+  }
+
+  /**
+   * A-8 / D-2 — the institution's fn_CostAnalysis. The mock reproduces its documented shape (the 80%
+   * rule and loan / 5) so the equivalence test has something to compare; the real numbers come from
+   * the function itself, never from this arithmetic.
+   */
+  async getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null> {
+    const s = this.data.students.find((r) => r.idnumber === id);
+    if (!s) return null;
+    const items = await this.getClearanceWorksheetItems(id, "");
+    const net = round2(items.reduce((t, r) => t + r.amount, 0));
+    const amtdue = round2(s.accountBalance + net);
+    const eighty = round2(amtdue * 0.8);
+    const needed = round2(Math.max(0, eighty));
+    return { eighty, amtdue, needed, loan: round2(needed / 5), payment: round2(needed / 5) };
+  }
+
+  /** Bio Spec 1.3 recordset shape, shared by search and the bio card so the two cannot disagree. */
+  private searchRow(s: StudentRow): StudentSearchRow {
+    const bio = this.data.bios.get(s.idnumber);
+    return {
+      idnumber: s.idnumber,
+      lastName: s.lastName,
+      firstName: s.firstName,
+      email: s.email,
+      phone: bio?.phone ?? null,
+      lastCleared: s.lastCleared,
+      accountBalance: s.accountBalance,
+      classificationCode: s.classificationCode,
+      clearedCurrentSession: s.status === "Cleared",
+      enrolledCurrentTerm: s.enrolledCurrentTerm,
+      state: !s.enrolledCurrentTerm ? "not-enrolled" : s.status === "Cleared" ? "cleared" : "not-cleared",
+    };
   }
 }
 

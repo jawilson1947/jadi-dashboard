@@ -17,12 +17,24 @@ import type {
   PageRequest,
   ReceivableSummary,
   SourceInfo,
+  StudentBio,
   StudentRow,
+  StudentSearchQuery,
+  StudentSearchRow,
+  StudentKey,
   TermKey,
   TermMetadata,
+  TransactionRow,
+  TransactionScope,
+  WorksheetItemRow,
+  CostAnalysisRow,
 } from "../types";
 import { DataSourceUnavailableError, resolveTerms } from "../types";
+import { parseCompactDate } from "@/lib/format";
+import { escapeLike } from "@/lib/search";
 import { Q } from "./sql";
+import { QS } from "./student-sql";
+import { getConfig } from "../../db/config";
 
 /**
  * SQL Server DataProvider over ousadb (read-only login). Column names and semantics were
@@ -215,6 +227,77 @@ export class MssqlDataProvider implements DataProvider {
     return r.recordset.map((row) => ({ termKey: (row.termKey ?? "").trim(), students: Number(row.students), positiveBalance: money(row.positiveBalance) }));
   }
 
+  /* ── Phase 5 — Student subsystem (Bio Spec; docs/STUDENT-PLAN.md) ── */
+
+  async searchStudents(query: StudentSearchQuery): Promise<StudentSearchRow[]> {
+    const req = (await this.pool()).request().input("limit", sql.Int, query.limit);
+    if (query.by === "id") {
+      const id = query.idnumber ?? "";
+      const r = await req.input("id", sql.VarChar(50), id).input("idPrefix", sql.VarChar(60), `${escapeLike(id)}%`).query<RawSearch>(QS.searchById);
+      return r.recordset.map(mapSearch);
+    }
+    // The service validated the terms; building (and escaping) the LIKE pattern belongs here, in the
+    // only module that speaks SQL. ESCAPE '\\' in the statement makes a literal % or _ behave as text.
+    const r = await req
+      .input("last", sql.VarChar(120), `%${escapeLike(query.lastName ?? "")}%`)
+      .input("first", sql.VarChar(120), query.firstName ? `%${escapeLike(query.firstName)}%` : null)
+      .query<RawSearch>(QS.searchByName);
+    return r.recordset.map(mapSearch);
+  }
+
+  async getStudentBio(id: StudentKey): Promise<StudentBio | null> {
+    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawBio>(QS.bio);
+    const row = r.recordset[0];
+    if (!row) return null;
+    return {
+      ...mapSearch(row),
+      middleName: row.midname,
+      pid: String(row.pid),
+      dob: row.dob ? new Date(row.dob).toISOString().slice(0, 10) : null,
+      cnp: row.CNP === null || row.CNP === undefined ? null : money(row.CNP),
+      address: { address: row.Address, city: row.City, stateCode: row.StateCode, zipCode: row.zipcode, country: row.Country },
+      clearedOn: parseCompactDate(row.ClearedOn),
+    };
+  }
+
+  /**
+   * Bio Spec 2. `current` is the co-located jadi copy. `global` goes through the linked server that
+   * A-24 flags as possibly production, so it is refused unless an operator has deliberately enabled
+   * it — a missing flag is reported as an unavailable source, not silently returned as "no history".
+   */
+  async getStudentTransactions(id: StudentKey, scope: TransactionScope): Promise<TransactionRow[]> {
+    const cfg = getConfig();
+    if (scope === "global" && !cfg.TRANS_HIST_GLOBAL_ENABLED) {
+      throw new DataSourceUnavailableError(
+        "Global transaction history is not enabled: the linked server holding it has not been confirmed as non-production (ASSUMPTIONS A-24).",
+      );
+    }
+    const text = scope === "global" ? QS.globalTransactions(cfg.TRANS_HIST_GLOBAL_SERVER) : QS.currentTermTransactions;
+    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawTransaction>(text);
+    return r.recordset.map(mapTransaction);
+  }
+
+  async getClearanceWorksheetItems(id: StudentKey, dropClassesDate: string): Promise<WorksheetItemRow[]> {
+    const r = await (await this.pool())
+      .request()
+      .input("id", sql.VarChar(50), id)
+      .input("dropDate", sql.Date, new Date(`${dropClassesDate}T00:00:00Z`))
+      .query<RawWorksheetItem>(QS.worksheetItems);
+    return lastSet(r).map((row) => ({
+      description: row.TRANS_DESC ?? "",
+      amount: money(row.TRANS_AMT),
+      postedOn: row.TRANS_DTE ? new Date(row.TRANS_DTE).toISOString().slice(0, 10) : null,
+      sourceCode: row.SOURCE_CDE ?? null,
+    }));
+  }
+
+  async getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null> {
+    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawCostAnalysis>(QS.costAnalysis);
+    const row = r.recordset[0];
+    if (!row) return null;
+    return { eighty: money(row.eighty), amtdue: money(row.amtdue), needed: money(row.needed), loan: money(row.loan), payment: money(row.payment) };
+  }
+
   /** Convenience for tests/health: confirms the current/previous term rows resolve. */
   async checkTerms() {
     return resolveTerms(await this.getTermMetadata());
@@ -259,6 +342,53 @@ interface RawStudent {
   idnumber: string; lastname: string | null; firstname: string | null; midname: string | null; pid: number;
   email: string | null; cCode: string; isIncomingTransfer: number; ClearedCurrentSession: boolean | null;
   AccountBalance: number | null; LastCleared: string; ClearedBy: string | null; DateCleared: Date | null; enrolled: number;
+}
+
+interface RawSearch {
+  idnumber: string; lastname: string | null; firstname: string | null; email: string | null; phone: string | null;
+  LastCleared: string | null; AccountBalance: number | null; cCode: string | null; ClearedCurrentSession: boolean | null; enrolled: number;
+}
+
+interface RawBio extends RawSearch {
+  midname: string | null; pid: number; dob: Date | string | null; CNP: number | null;
+  Address: string | null; City: string | null; StateCode: string | null; zipcode: string | null; Country: string | null;
+  ClearedOn: string | null;
+}
+
+interface RawTransaction {
+  TRANS_DTE: Date | string | null; TRANS_DESC: string | null; TRANS_AMT: number | null; SOURCE_CDE: string | null;
+}
+
+/** Sp_GetFCWorksheetItems returns trans_hist-shaped rows; the alias documents where they come from. */
+type RawWorksheetItem = RawTransaction;
+
+interface RawCostAnalysis { eighty: number | null; amtdue: number | null; needed: number | null; loan: number | null; payment: number | null; }
+
+function mapSearch(r: RawSearch): StudentSearchRow {
+  const enrolledCurrentTerm = Boolean(r.enrolled);
+  const clearedCurrentSession = Boolean(r.ClearedCurrentSession);
+  return {
+    idnumber: r.idnumber,
+    lastName: r.lastname ?? "",
+    firstName: r.firstname ?? "",
+    email: r.email ?? "",
+    phone: r.phone,
+    lastCleared: r.LastCleared ?? null,
+    accountBalance: money(r.AccountBalance),
+    classificationCode: r.cCode ?? "",
+    clearedCurrentSession,
+    enrolledCurrentTerm,
+    state: !enrolledCurrentTerm ? "not-enrolled" : clearedCurrentSession ? "cleared" : "not-cleared",
+  };
+}
+
+function mapTransaction(r: RawTransaction): TransactionRow {
+  return {
+    postedOn: r.TRANS_DTE ? new Date(r.TRANS_DTE).toISOString().slice(0, 10) : "",
+    description: (r.TRANS_DESC ?? "").trim(),
+    amount: money(r.TRANS_AMT),
+    sourceCode: (r.SOURCE_CDE ?? "").trim(),
+  };
 }
 
 function mapStudent(r: RawStudent): StudentRow {

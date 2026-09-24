@@ -48,6 +48,35 @@ const envSchema = z.object({
   WORKER_ID: z.string().optional(),
   /** Source database (ousadb) read-only connection. Only used by the mssql provider. */
   OUSADB_CONNECTION_STRING: z.string().optional(),
+  /* ── Phase 5 — Student subsystem (docs/STUDENT-PLAN.md) ────────────────────────────────── */
+  /** UNC path or folder holding <idnumber>.jpg student photos (A-27). Unset = the card shows a placeholder. */
+  STUDENT_PHOTO_SHARE: z.string().optional(),
+  /**
+   * A-24 is unsigned: the Bio Spec's global trans_hist lives behind a linked server that may be
+   * PRODUCTION. The query is only sent when this is deliberately set to true, so nobody reaches
+   * production data by forgetting a flag.
+   */
+  TRANS_HIST_GLOBAL_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+  /** Four-part-name prefix of the linked server holding the Jenzabar Cloud copy (A-24). */
+  TRANS_HIST_GLOBAL_SERVER: z.string().default("[172.18.96.11,1433\\MSSQL].[TMSEPRD]"),
+  /** Master switch for every AI module (Spec §12, A-13). */
+  AI_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+  /**
+   * A-26: separate switch for the ONE path that sends identified student data (the collection
+   * notice). AI_ENABLED alone must not be enough to turn it on.
+   */
+  AI_IDENTIFIED_DATA_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+  /** Days a stored AI draft is kept (A-13 retention). */
+  AI_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   /** Which SQL Server the two connection strings point at (docs/TARGET-SWITCHING-PLAN.md).
    *  Set by the npm scripts (dev:prod, worker:prod, ...); defaults to staging so that a
    *  forgotten flag goes somewhere harmless. resolveTarget() has already run by the time this
@@ -71,6 +100,11 @@ export function getConfig(): AppConfig {
   }
   if (parsed.data.APP_ENV === "production" && parsed.data.AUTH_DEV_LOGIN) {
     throw new Error("AUTH_DEV_LOGIN must not be enabled in production.");
+  }
+  // A-26: identified data may only go to a model when the AI module itself is on. Setting the
+  // narrower switch alone is a configuration mistake, not a quiet half-enablement.
+  if (parsed.data.AI_IDENTIFIED_DATA_ENABLED && !parsed.data.AI_ENABLED) {
+    throw new Error("AI_IDENTIFIED_DATA_ENABLED requires AI_ENABLED=true (ASSUMPTIONS A-13, A-26).");
   }
   if (parsed.data.APP_ENV !== "development" && parsed.data.SESSION_SECRET.startsWith("dev-only")) {
     throw new Error("SESSION_SECRET must be set outside development.");

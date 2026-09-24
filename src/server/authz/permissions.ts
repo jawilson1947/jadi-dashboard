@@ -7,6 +7,12 @@ export const PERMISSIONS = [
   "history.view",
   "student.view",
   "student.pid.view",
+  // Phase 5 (A-29): DOB and CNP on the bio card. Masked for everyone else; revealing is audited.
+  "student.pii.view",
+  // Phase 5: both transaction cards and the payment analysis (Bio Spec 2-3).
+  "student.transactions.view",
+  // Phase 5: the live financial-clearance recomputation (Bio Spec 4-5), distinct from the filed worksheet PDF.
+  "student.clearance.analyze",
   "student.academic.view",
   "worksheet.view",
   "export.create",
@@ -17,6 +23,9 @@ export const PERMISSIONS = [
   "schedule.manage",
   "connection.manage",
   "ai.view",
+  // Phase 5f (A-26): drafting a collection notice sends IDENTIFIED student data to an external model.
+  // Separate from ai.view, which only reads aggregate narratives.
+  "ai.notice.create",
   "audit.view",
 ] as const;
 
@@ -32,6 +41,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "dashboard.view",
     "history.view",
     "student.view",
+    "student.transactions.view",
+    "student.clearance.analyze",
     "worksheet.view",
     "export.create",
     "mailmerge.create",

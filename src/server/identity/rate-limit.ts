@@ -19,6 +19,10 @@ export interface RateLimitRule {
 
 export const SIGN_IN_RULE: RateLimitRule = { capacity: 10, refillPerMinute: 5 };
 export const TOKEN_RULE: RateLimitRule = { capacity: 5, refillPerMinute: 1 };
+/** Phase 5 (Spec §10.1): student search is a lookup tool, not a bulk extraction channel. */
+export const STUDENT_SEARCH_RULE: RateLimitRule = { capacity: 30, refillPerMinute: 30 };
+/** A-26: an AI collection notice costs money and sends identified data — a few per hour is plenty. */
+export const AI_NOTICE_RULE: RateLimitRule = { capacity: 5, refillPerMinute: 0.08 };
 
 /** Returns true when the request may proceed (one token consumed), false when throttled. */
 export function takeToken(key: string, rule: RateLimitRule, now = Date.now()): boolean {

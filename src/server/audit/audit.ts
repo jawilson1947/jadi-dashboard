@@ -15,6 +15,13 @@ export type AuditAction =
   | "dashboard.refresh"
   | "student.list_view"
   | "student.profile_view"
+  // Phase 5 — the Student subsystem is student-level end to end, so each card has its own action.
+  | "student.search"
+  | "student.pii_reveal"
+  | "student.photo_view"
+  | "student.transactions_view"
+  | "student.clearance_analyze"
+  | "ai.notice_draft"
   | "worksheet.view"
   | "export.create"
   | "ai.request"

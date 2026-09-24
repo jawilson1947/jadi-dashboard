@@ -4,7 +4,7 @@
  *   - students   ≈ tblStudent joined with VIEW_OURM membership and STATS clearance actions
  * Seeded PRNG so every run, test and screenshot sees the same data. No real students.
  */
-import type { StudentRow, TermMetadata } from "../types";
+import type { PostalAddress, StudentRow, TermMetadata, TransactionRow } from "../types";
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -60,9 +60,19 @@ export function generateTerms(): TermMetadata[] {
   return rows;
 }
 
+/** Bio Spec 1.3 fields that are not part of StudentRow (the aggregate screens never need them). */
+export interface SyntheticBio {
+  dob: string;
+  cnp: number;
+  phone: string;
+  address: PostalAddress;
+  clearedOn: string | null;
+}
+
 export interface SyntheticDataset {
   terms: TermMetadata[];
   students: StudentRow[];
+  bios: Map<string, SyntheticBio>;
   charges: number;
   credits: number;
   afterDropDate: boolean;
@@ -155,5 +165,94 @@ export function generateSyntheticDataset(seed = 20260917): SyntheticDataset {
     }
   }
 
-  return { terms, students, charges, credits, afterDropDate: true };
+  const bios = new Map<string, SyntheticBio>();
+  for (const s of students) bios.set(s.idnumber, generateBio(s));
+
+  return { terms, students, bios, charges, credits, afterDropDate: true };
+}
+
+const STREETS = ["Oak St", "Maple Ave", "Cedar Ln", "Pine Rd", "Elm Ct", "Birch Way", "Willow Dr", "Spruce Blvd"];
+const CITIES: Array<[string, string, string]> = [
+  ["Jackson", "MS", "39201"], ["Memphis", "TN", "38103"], ["Mobile", "AL", "36602"],
+  ["Baton Rouge", "LA", "70801"], ["Little Rock", "AR", "72201"], ["Atlanta", "GA", "30303"],
+];
+
+/** Deterministic per-student PRNG so a profile looks the same on every run, test and screenshot. */
+function studentRnd(idnumber: string, salt: number): () => number {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < idnumber.length; i++) {
+    h ^= idnumber.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return mulberry32(h >>> 0);
+}
+
+/** Bio Spec 1.3 fields. No real people: names, addresses and identifiers are all synthetic. */
+function generateBio(s: StudentRow): SyntheticBio {
+  const rnd = studentRnd(s.idnumber, 11);
+  const year = 1992 + Math.floor(rnd() * 16);
+  const month = 1 + Math.floor(rnd() * 12);
+  const day = 1 + Math.floor(rnd() * 28);
+  const [city, stateCode, zipCode] = CITIES[Math.floor(rnd() * CITIES.length)];
+  return {
+    dob: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    cnp: Math.round(rnd() * 250000) / 100,
+    phone: `(${200 + Math.floor(rnd() * 700)}) ${200 + Math.floor(rnd() * 700)}-${String(Math.floor(rnd() * 10000)).padStart(4, "0")}`,
+    address: {
+      address: `${100 + Math.floor(rnd() * 9800)} ${STREETS[Math.floor(rnd() * STREETS.length)]}`,
+      city,
+      stateCode,
+      zipCode,
+      country: "US",
+    },
+    clearedOn: s.clearedAt ? s.clearedAt.toISOString().slice(0, 10) : null,
+  };
+}
+
+/**
+ * Synthetic trans_hist for one student (Bio Spec 2). Shaped like the real thing: tuition charges
+ * (`CG`) each term, financial aid (`FA`) and payments (`RC`) against them, the odd incidental
+ * (`BN`) and refund (`IV`). The running total is closed out with a final adjustment so the sum of
+ * the recordset equals tblStudent.AccountBalance — the reconciliation the payment analysis claims
+ * on screen is therefore exercised by the mock, not only by staging.
+ *
+ * `scope` mirrors the two sources in D-1: `current` is this term only (jadi.dbo.trans_hist),
+ * `global` is the whole history (the TMSEPRD linked server).
+ */
+export function generateTransactions(s: StudentRow, scope: "current" | "global", termStart: Date, now: Date = new Date()): TransactionRow[] {
+  const rnd = studentRnd(s.idnumber, scope === "current" ? 23 : 29);
+  const rows: TransactionRow[] = [];
+  const years = scope === "current" ? 1 : 1 + Math.floor(rnd() * 5);
+  const push = (postedOn: Date, description: string, amount: number, sourceCode: string) => {
+    if (postedOn > now) return;
+    rows.push({ postedOn: postedOn.toISOString().slice(0, 10), description, amount: Math.round(amount * 100) / 100, sourceCode });
+  };
+
+  for (let y = years - 1; y >= 0; y--) {
+    const base = new Date(termStart.getTime() - y * 365 * 86400000);
+    const tuition = 4200 + Math.round(rnd() * 3200);
+    push(base, "Tuition and fees", tuition, "CG");
+    if (rnd() < 0.85) push(new Date(base.getTime() + 8 * 86400000), "Pell Grant", -Math.round(tuition * (0.25 + rnd() * 0.4)), "FA");
+    if (rnd() < 0.6) push(new Date(base.getTime() + 15 * 86400000), "Institutional scholarship", -Math.round(tuition * (0.1 + rnd() * 0.25)), "FA");
+    if (rnd() < 0.75) push(new Date(base.getTime() + 24 * 86400000), "Payment received", -Math.round(200 + rnd() * 900), "RC");
+    if (rnd() < 0.3) push(new Date(base.getTime() + 33 * 86400000), "Payroll deduction", -Math.round(60 + rnd() * 240), "LB");
+    if (rnd() < 0.35) push(new Date(base.getTime() + 40 * 86400000), "Parking / library fine", Math.round(15 + rnd() * 120), "BN");
+    if (rnd() < 0.12) push(new Date(base.getTime() + 52 * 86400000), "Refund issued", Math.round(80 + rnd() * 400), "IV");
+    if (rnd() < 0.1) push(new Date(base.getTime() + 60 * 86400000), "Adjustment", Math.round((rnd() - 0.5) * 300), "MS");
+  }
+
+  // Close the account out to the authoritative balance (A-18) with one dated line, so the card's
+  // "totals reconcile with the balance" claim is true of the mock as well as of staging.
+  const net = Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100;
+  const delta = Math.round((s.accountBalance - net) * 100) / 100;
+  if (Math.abs(delta) >= 0.01 && scope === "global") {
+    const at = new Date(Math.min(now.getTime(), termStart.getTime() + 70 * 86400000));
+    rows.push({
+      postedOn: at.toISOString().slice(0, 10),
+      description: delta > 0 ? "Balance forward" : "Credit applied",
+      amount: delta,
+      sourceCode: delta > 0 ? "CG" : "RC",
+    });
+  }
+  return rows.sort((a, b) => b.postedOn.localeCompare(a.postedOn));
 }
