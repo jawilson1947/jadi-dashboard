@@ -56,10 +56,20 @@ async function probe({ label, connectionString }: Probe): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const { target } = resolveTarget(process.env);
+  const { target, overridden } = resolveTarget(process.env);
   console.log(`DB_TARGET=${target}`);
   await probe({ label: "ousadb", connectionString: process.env.OUSADB_CONNECTION_STRING });
   await probe({ label: "dash", connectionString: process.env.DASH_CONNECTION_STRING });
+
+  // The photo share is the other thing that differs by target, and the only one that can serve
+  // real students' photographs from a staging run. Named, never printed: this output gets pasted
+  // into tickets. A share is not a credential, but a UNC path is still a map of the file server.
+  const source = overridden.find((o) => o.startsWith("STUDENT_PHOTO_SHARE<-"))?.split("<-")[1];
+  console.log(
+    process.env.STUDENT_PHOTO_SHARE
+      ? `photos   from=${source ?? "STUDENT_PHOTO_SHARE"}`
+      : "photos   none configured — the Bio card will show its placeholder",
+  );
 }
 
 main().catch((e) => {

@@ -66,7 +66,7 @@ BEGIN
     RETURN;
   END
 
-  DECLARE @lastCleared varchar(50), @exPeriod varchar(50);
+  DECLARE @lastCleared varchar(50), @exPeriod varchar(50), @cCode varchar(50);
 
   /*
     One registration row for the current term.
@@ -79,7 +79,8 @@ BEGIN
   SELECT TOP (1)
       @lastCleared = CASE WHEN T1.TRM_CDE = T0.EX_Leap_TRM_CDE THEN T0.JADI_LeapName
                           ELSE T0.JADI_TradName END,
-      @exPeriod    = CAST(T0.EX_YR_CDE AS varchar(20)) + CAST(T1.TRM_CDE AS varchar(20))
+      @exPeriod    = CAST(T0.EX_YR_CDE AS varchar(20)) + CAST(T1.TRM_CDE AS varchar(20)),
+      @cCode = ISNULL(T1.CLASS_CDE,'XX') 
   FROM [jadi].[dbo].[stud_term_sum_div] AS T1
   INNER JOIN dbo.tblOUSA AS T0
           ON T0.isCurrent = 1
@@ -104,7 +105,9 @@ BEGIN
       UPDATE S
          SET S.lastcleared = @lastCleared,
              S.EX_Period   = @exPeriod,
-             S.datechanged = GETDATE()
+			 S.cCode = @cCode,
+             S.datechanged = GETDATE(),
+			 S.updatemode = 'JD'
         FROM dbo.tblStudent AS S
        WHERE CASE WHEN LTRIM(RTRIM(ISNULL(S.idnumber, ''))) NOT LIKE '%[^0-9]%'
                    AND LEN(LTRIM(RTRIM(ISNULL(S.idnumber, '')))) BETWEEN 1 AND 18

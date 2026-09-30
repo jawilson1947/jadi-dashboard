@@ -56,8 +56,17 @@ const envSchema = z.object({
   DB_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(60_000),
   OUSADB_CONNECTION_STRING: z.string().optional(),
   /* ── Phase 5 — Student subsystem (docs/STUDENT-PLAN.md) ────────────────────────────────── */
-  /** UNC path or folder holding <idnumber>.jpg student photos (A-27). Unset = the card shows a placeholder. */
+  /**
+   * UNC path or folder holding <idnumber>.jpg student photos (A-27). Unset = the card shows a
+   * placeholder.
+   *
+   * On DB_TARGET=staging this is overridden by STAGING_PHOTO_SHARE when that is set, so a staging
+   * run does not serve photographs from the production share. resolveTarget() has already applied
+   * that by the time this is parsed — see TARGET_PREFERRED in ./target.ts.
+   */
   STUDENT_PHOTO_SHARE: z.string().optional(),
+  /** The staging photo share. Read only through the override above; nothing else reads this name. */
+  STAGING_PHOTO_SHARE: z.string().optional(),
   /**
    * A-24 is unsigned: the Bio Spec's global trans_hist lives behind a linked server that may be
    * PRODUCTION. The query is only sent when this is deliberately set to true, so nobody reaches
@@ -145,6 +154,11 @@ export function getConfig(): AppConfig {
       store: cached.APP_STORE,
       ousaHost: connectionHost(cached.OUSADB_CONNECTION_STRING),
       dashHost: connectionHost(cached.DASH_CONNECTION_STRING),
+      // WHICH variable the photo share came from, never the path itself. "Why is staging showing
+      // production photos" is otherwise only answerable by reading .env.local on the server.
+      photoShare: cached.STUDENT_PHOTO_SHARE
+        ? (resolved.overridden.find((o) => o.startsWith("STUDENT_PHOTO_SHARE<-"))?.split("<-")[1] ?? "STUDENT_PHOTO_SHARE")
+        : "none",
     }),
   );
 

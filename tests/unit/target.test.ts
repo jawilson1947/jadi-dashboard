@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { connectionHost, isTarget, missingConnectionMessage, resolveTarget } from "@/server/db/target";
+import { connectionHost, isTarget, missingConnectionMessage, resolveTarget, targetPreferredSource } from "@/server/db/target";
 
 const STAGING_OUSA = "Server=STAGINGSQL;Database=ousadb;User Id=jadi_readonly;Password=s3cret-staging;Encrypt=true";
 const STAGING_DASH = "Server=STAGINGSQL;Database=ousadb;User Id=jadi_dash;Password=s3cret-staging;Encrypt=true";
@@ -74,6 +74,77 @@ describe("resolveTarget (docs/TARGET-SWITCHING-PLAN.md)", () => {
     env.DB_TARGET = "production";
     resolveTarget(env);
     expect(env.DB_TARGET).toBe("production");
+  });
+});
+
+/**
+ * The student photo share inverts the "explicit beats derived" rule above, and the inversion is
+ * the whole point: .env.local sets STUDENT_PHOTO_SHARE to the PRODUCTION share, so without the
+ * override a staging run would serve photographs of real students (A-27, J. Wilson 2026-09-30).
+ */
+describe("target-preferred variables: the student photo share", () => {
+  const PROD_SHARE = "\\\\prodfs\\StudentPhotos";
+  const STAGING_SHARE = "\\\\stagefs\\StudentPhotos";
+
+  function shares(target?: string): NodeJS.ProcessEnv {
+    const env = bothPairs();
+    env.STUDENT_PHOTO_SHARE = PROD_SHARE;
+    env.STAGING_PHOTO_SHARE = STAGING_SHARE;
+    if (target) env.DB_TARGET = target;
+    return env;
+  }
+
+  it("uses the staging share on staging, even though the generic name is set", () => {
+    // This is the case the connection-string rule would get wrong.
+    const env = shares("staging");
+    const r = resolveTarget(env);
+    expect(env.STUDENT_PHOTO_SHARE).toBe(STAGING_SHARE);
+    expect(r.overridden).toEqual(["STUDENT_PHOTO_SHARE<-STAGING_PHOTO_SHARE"]);
+  });
+
+  it("applies on the default target too — a forgotten DB_TARGET must not reach production photos", () => {
+    const env = shares();
+    resolveTarget(env);
+    expect(env.STUDENT_PHOTO_SHARE).toBe(STAGING_SHARE);
+  });
+
+  it("uses the production share on production", () => {
+    const env = shares("production");
+    const r = resolveTarget(env);
+    expect(env.STUDENT_PHOTO_SHARE).toBe(PROD_SHARE);
+    expect(r.overridden).toEqual([]);
+  });
+
+  it("falls back to the generic name when no staging share is configured", () => {
+    const env = shares("staging");
+    delete env.STAGING_PHOTO_SHARE;
+    resolveTarget(env);
+    expect(env.STUDENT_PHOTO_SHARE).toBe(PROD_SHARE);
+  });
+
+  it("leaves the share unset when neither is configured, so the card shows its placeholder", () => {
+    const env = bothPairs();
+    resolveTarget(env);
+    expect(env.STUDENT_PHOTO_SHARE).toBeUndefined();
+  });
+
+  it("does not disturb the connection strings, which keep the opposite rule", () => {
+    const env = shares("staging");
+    env.OUSADB_CONNECTION_STRING = PROD_OUSA; // explicitly set — must survive
+    resolveTarget(env);
+    expect(env.OUSADB_CONNECTION_STRING).toBe(PROD_OUSA);
+  });
+
+  it("reports the source variable name rather than the path", () => {
+    // The overridden entry is logged by config.ts, so it must name variables, not values.
+    const env = shares("staging");
+    const r = resolveTarget(env);
+    for (const entry of r.overridden) {
+      expect(entry).not.toContain(STAGING_SHARE);
+      expect(entry).not.toContain(PROD_SHARE);
+    }
+    expect(targetPreferredSource("STUDENT_PHOTO_SHARE", "staging")).toBe("STAGING_PHOTO_SHARE");
+    expect(targetPreferredSource("STUDENT_PHOTO_SHARE", "production")).toBeUndefined();
   });
 });
 

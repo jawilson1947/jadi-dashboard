@@ -126,6 +126,34 @@ A wrong target that runs silently is the failure mode worth engineering against.
 
 ---
 
+### 2.5 Target-preferred variables (added 2026-09-30)
+
+The rule in §2.2 is *explicit generic name wins*: a directly-set `OUSADB_CONNECTION_STRING` is never
+replaced by the suffixed pair. That is right for a connection string, which has no correct default —
+falling back to the one someone set explicitly is the safe move.
+
+It is wrong for the **student photo share**. `.env.local` sets `STUDENT_PHOTO_SHARE` to the
+production share and `STAGING_PHOTO_SHARE` beside it. Under §2.2 the generic name is always set, so
+the staging entry would never be read and a staging run would serve photographs of real students
+(A-27). So a second, narrower rule applies to a named list of variables:
+
+```
+TARGET_PREFERRED   DB_TARGET=staging     -> STAGING_PHOTO_SHARE if set, else STUDENT_PHOTO_SHARE
+                   DB_TARGET=production  -> STUDENT_PHOTO_SHARE
+```
+
+The two rules are opposites, and the difference is whether the variable has a correct default.
+A share does (production); a credential does not. **Only non-secret values belong in
+`TARGET_PREFERRED`** — an entry there can override something a person set deliberately, which is
+exactly what you do not want for a password. The resolver reports each override as
+`NAME<-SOURCE`, two variable names and no value, so it stays safe to log; `config.ts` puts that in
+the `config resolved` line as `photoShare`, which answers "which share is this run actually
+reading" without printing a path.
+
+`STAGING_WORKSHEET_SHARE` and `STUDENT_WORKSHEET_SHARE` are present in `.env.local` but **read by
+nothing**: clearance worksheet folders come from `tblOUSA.WorksheetFolder` per semester, which
+stores an absolute path. Left alone by decision (J. Wilson, 2026-09-30) rather than guessed at.
+
 ## 3. Guards worth adding at the same time
 
 These cost a few lines and remove the class of mistake this whole session has been about.
