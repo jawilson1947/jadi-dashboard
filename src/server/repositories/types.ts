@@ -428,6 +428,17 @@ export type ReclaimOutcome =
   | "partial_not_allowed"
   | "invalid_id";
 
+/** Outcome of setting a student's semester from their Jenzabar registration (A-33). */
+export type SemesterUpdateOutcome = "updated" | "no_registration" | "no_student" | "invalid_id";
+
+export interface SemesterUpdateResult {
+  outcome: SemesterUpdateOutcome;
+  /** The value written, taken from tblOUSA.JADI_TradName / JADI_LeapName so it always resolves. */
+  lastCleared: string | null;
+  exPeriod: string | null;
+  rowsUpdated: number;
+}
+
 export interface ReclaimResult {
   outcome: ReclaimOutcome;
   hasStudentMaster: boolean;
@@ -509,6 +520,13 @@ export interface DataProvider {
    * the normal state until a DBA runs db/production/10_usp_reclaim_student.sql.
    */
   reclaimStudent(id: StudentKey, actor: string, allowPartial: boolean): Promise<ReclaimResult>;
+  /**
+   * Set a student's semester from their current-term Jenzabar registration (A-33). The second and
+   * only other write the application makes to source data, and it goes through its own dbo-owned
+   * procedure for the same reason. Throws DataSourceUnavailableError when that procedure is not
+   * installed, which is the normal state until a DBA runs db/production/11_usp_update_student_semester.sql.
+   */
+  updateStudentSemester(id: StudentKey, actor: string): Promise<SemesterUpdateResult>;
   /**
    * Names, emails and current balances for a set of ids — the live half of every report row (A-30).
    * Batched by the caller; ids absent from tblStudent are simply missing from the result.

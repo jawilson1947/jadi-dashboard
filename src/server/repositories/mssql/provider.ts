@@ -37,6 +37,8 @@ import type {
   ReclaimDiagnostic,
   ReclaimResult,
   ReclaimOutcome,
+  SemesterUpdateResult,
+  SemesterUpdateOutcome,
 } from "../types";
 import { DataSourceUnavailableError, resolveTerms } from "../types";
 import { parseCompactDate } from "@/lib/format";
@@ -529,6 +531,30 @@ export class MssqlDataProvider implements DataProvider {
     }
   }
 
+  async updateStudentSemester(id: StudentKey, actor: string): Promise<SemesterUpdateResult> {
+    try {
+      const r = await (await this.pool())
+        .request()
+        .input("id", sql.VarChar(50), id)
+        .input("actor", sql.VarChar(200), actor)
+        .query<RawSemesterUpdate>(QS.updateSemester);
+      const x = r.recordset[0];
+      if (!x) throw new DataSourceUnavailableError("The semester update procedure returned no outcome.");
+      return {
+        outcome: x.outcome as SemesterUpdateOutcome,
+        lastCleared: text(x.lastCleared),
+        exPeriod: text(x.exPeriod),
+        rowsUpdated: Number(x.rowsUpdated ?? 0),
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/Could not find stored procedure|permission was denied|EXECUTE permission/i.test(msg)) {
+        throw new DataSourceUnavailableError("The semester update procedure is not installed or not granted.", err);
+      }
+      throw err;
+    }
+  }
+
 }
 
 /** Multi-statement batches (temp-table prelude) return their SELECT as the final recordset. */
@@ -679,6 +705,7 @@ interface RawEnrolleeBalance { idnumber: string | number; classCode: string; raw
 interface RawCurrentlyCleared { idnumber: string | number; classCode: string; rawClassCode: string; dateCleared: string | Date | null }
 interface RawDiagnostic { inTblStudent: number; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; addressRows: number; qualifyingAddressRows: number; addressCodes: string | null; lastName: string | null; firstName: string | null; middleName: string | null; email: string | null; city: string | null; stateCode: string | null }
 interface RawReclaim { outcome: string; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; hasQualifyingAddress: number; addressRows: number; rowsInserted: number }
+interface RawSemesterUpdate { outcome: string; lastCleared: string | number | null; exPeriod: string | number | null; rowsUpdated: number }
 interface RawContact { idnumber: string | number; lastname: string | null; firstname: string | null; email: string | number | null; AccountBalance: number | string | null }
 
 /**

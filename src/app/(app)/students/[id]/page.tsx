@@ -22,6 +22,7 @@ import { ClearanceCard } from "@/components/students/ClearanceCard";
 import { Unavailable } from "@/components/students/Unavailable";
 import { getAppStore } from "@/server/store";
 import { describeGaps } from "@/server/services/reclaim";
+import { canUpdateSemester, SEMESTER_UPDATE_MESSAGES } from "@/server/services/semester-update";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Student Profile" };
@@ -35,6 +36,8 @@ const paramsSchema = z.object({
   scope: z.enum(["current", "global"]).default("global"),
   year: z.string().regex(/^\d{4}$/).optional(),
   page: z.coerce.number().int().min(1).default(1),
+  // Outcome of an Update Semester run, carried back through the 303 (A-33).
+  semester: z.enum(["updated", "no_registration", "no_student", "invalid_id", "unavailable"]).optional(),
 });
 
 /**
@@ -124,7 +127,16 @@ export default async function StudentProfilePage({
         ))}
       </nav>
 
-      {tab === "bio" ? <BioCard profile={profile} canReveal={mayReveal} revealHref={`${base}?tab=bio&reveal=dob`} hideHref={`${base}?tab=bio`} /> : null}
+      {tab === "bio" ? (
+        <BioCard
+          profile={profile}
+          canReveal={mayReveal}
+          revealHref={`${base}?tab=bio&reveal=dob`}
+          hideHref={`${base}?tab=bio`}
+          canUpdateSemester={hasPermission(principal, "student.update") && canUpdateSemester(profile.lastCleared, profile.lastClearedLabel)}
+          semesterOutcome={q.semester ? { status: q.semester, message: SEMESTER_UPDATE_MESSAGES[q.semester] } : null}
+        />
+      ) : null}
 
       {tab === "transactions" ? await renderTransactions(id, q.scope, q.year, q.page, profile.currentTermRecord, base) : null}
 

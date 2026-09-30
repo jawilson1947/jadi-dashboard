@@ -19,6 +19,10 @@ export const PERMISSIONS = [
   // permission in the set that authorises a write to SOURCE data, so it is deliberately not part
   // of any role but ADMINISTRATOR and must be granted per user.
   "student.create",
+  // Phase 5g (A-33): set a student's semester from their Jenzabar registration. A write to SOURCE
+  // data like student.create, but a different act — it moves an existing student into current-term
+  // populations — so it is its own permission and the audit log can tell the two apart.
+  "student.update",
   "export.create",
   "mailmerge.create",
   "operator.manage",
@@ -47,6 +51,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "student.view",
     "student.transactions.view",
     "student.clearance.analyze",
+    // Grantable to operators (J. Wilson, 2026-09-30): clearance staff hit this at the counter.
+    "student.update",
     "worksheet.view",
     "export.create",
     "mailmerge.create",

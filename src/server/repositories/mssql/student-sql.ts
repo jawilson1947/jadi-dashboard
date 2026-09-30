@@ -148,6 +148,13 @@ SELECT
   reclaimExecute: `EXEC dbo.usp_ReclaimStudentFromJenzabar @id_num = @id, @actor = @actor, @allow_partial = @allowPartial;`,
 
   /**
+   * Set a student's semester from their Jenzabar registration (A-33). EXEC only — the application
+   * has no UPDATE privilege on dbo and must not acquire one; the procedure is the whole contract.
+   */
+  updateSemester: `EXEC dbo.usp_UpdateStudentSemester @Idnumber = @id, @actor = @actor;`,
+
+
+  /**
    * Bio Spec 1.5.1 — the institution's own worksheet procedure. Read-only, and the drop date comes
    * from tblOUSA (the isCurrent row), never from the client.
    */

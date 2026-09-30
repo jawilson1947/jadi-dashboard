@@ -13,8 +13,28 @@ import { formatCurrency, formatIsoDateSafe } from "@/lib/format";
  * as currency. It stands for Credits Not Posted (J. Wilson, 2026-09-24) — aid or payments awarded
  * but not yet applied — and the card uses that name rather than the column name.
  */
-export function BioCard({ profile, canReveal, revealHref, hideHref }: { profile: StudentProfile; canReveal: boolean; revealHref: string; hideHref: string }) {
+export function BioCard({
+  profile,
+  canReveal,
+  revealHref,
+  hideHref,
+  canUpdateSemester = false,
+  semesterOutcome = null,
+}: {
+  profile: StudentProfile;
+  canReveal: boolean;
+  revealHref: string;
+  hideHref: string;
+  /** The stored semester is missing or unresolvable AND the caller may set it (A-33). */
+  canUpdateSemester?: boolean;
+  /** Result of the update the user just ran, carried back through the redirect. */
+  semesterOutcome?: { status: string; message: string } | null;
+}) {
   const a = profile.address;
+  // Step 4: when Jenzabar holds no current-term registration, the label itself carries the answer.
+  // Leaving it reading "No semester on record" would make a button that appears to do nothing.
+  const semesterLabelText =
+    semesterOutcome?.status === "no_registration" ? "No Semester Info found" : profile.lastClearedLabel;
   const cityLine = [a.city, a.stateCode].filter(Boolean).join(", ");
   return (
     <section className="card" aria-label="Student bio">
@@ -49,7 +69,28 @@ export function BioCard({ profile, canReveal, revealHref, hideHref }: { profile:
 
         <Field label="Account balance" value={formatCurrency(profile.accountBalance)} hint={profile.accountBalance > 0 ? "Debit balance — money owed" : profile.accountBalance < 0 ? "Credit balance — in the student's favour" : undefined} />
         <Field label="Credits Not Posted" value={formatCurrency(profile.cnp)} hint="Aid or payments awarded but not yet applied to the account (tblStudent.CNP)" />
-        <Field label="Last Semester" value={profile.lastClearedLabel} />
+        <div>
+          <dt className="text-ink-3 text-xs">Last Semester</dt>
+          <dd>{semesterLabelText}</dd>
+          {semesterOutcome ? (
+            <p role="status" className={`text-xs mt-1 ${semesterOutcome.status === "updated" ? "text-ink-2" : "text-warning"}`}>
+              {semesterOutcome.message}
+            </p>
+          ) : null}
+          {canUpdateSemester && semesterOutcome?.status !== "no_registration" ? (
+            // POST, not a link: it writes to source data, and must not be reachable by prefetch.
+            <form method="post" action="/api/v1/students/semester" className="mt-2 no-print">
+              <input type="hidden" name="id" value={profile.idnumber} />
+              <button
+                type="submit"
+                className="rounded-md border border-brand text-brand px-3 py-1 text-xs hover:bg-brand-track"
+                title="Set this student's semester from their current-term registration in Jenzabar"
+              >
+                Update Semester
+              </button>
+            </form>
+          ) : null}
+        </div>
         <Field
           label={profile.currentTermRecord ? `Cleared for ${profile.lastClearedLabel} (current)` : profile.lastCleared ? `Cleared for ${profile.lastClearedLabel}` : "Clearance flag"}
           value={profile.clearedCurrentSession ? "Yes" : "No"}

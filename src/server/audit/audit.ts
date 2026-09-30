@@ -32,6 +32,7 @@ export type AuditAction =
   // Phase 5g (A-32): the application's only write to source data. Recorded with the artifacts
   // found and missing, so the audit row explains the state of the record it created.
   | "student.reclaim"
+  | "student.semester_update"
   | "ai.request"
   | "admin.change"
   | "job.manual_run"

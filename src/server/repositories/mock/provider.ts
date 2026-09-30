@@ -38,6 +38,7 @@ import type {
   StudentContactRow,
   ReclaimDiagnostic,
   ReclaimResult,
+  SemesterUpdateResult,
 } from "../types";
 import { resolveTerms } from "../types";
 import { generateSyntheticDataset, generateTransactions, type SyntheticDataset } from "./synthetic";
@@ -551,6 +552,25 @@ export class MockDataProvider implements DataProvider {
     if (!d.hasNameRecord) return { ...base, outcome: "no_name_record" };
     if ((!d.hasBiograph || d.qualifyingAddressRows === 0) && !allowPartial) return { ...base, outcome: "partial_not_allowed" };
     return { ...base, outcome: "inserted", rowsInserted: 1 };
+  }
+
+  /**
+   * Mock mode never writes. The outcome is derived so every branch the UI must handle is reachable:
+   * a student already on the current term updates, one with an id ending 7 stands for "registered
+   * nowhere this term" (the No Semester Info found path), and an unknown id is no_student.
+   */
+  async updateStudentSemester(id: StudentKey, _actor: string): Promise<SemesterUpdateResult> {
+    const student = this.data.students.find((s) => s.idnumber === id);
+    if (!student) return { outcome: "no_student", lastCleared: null, exPeriod: null, rowsUpdated: 0 };
+    if (id.endsWith("7")) return { outcome: "no_registration", lastCleared: null, exPeriod: null, rowsUpdated: 0 };
+    const terms = resolveTerms(this.data.terms);
+    return {
+      outcome: "updated",
+      // The same source the app matches against, mirroring what the procedure does.
+      lastCleared: terms.current.tradName,
+      exPeriod: `${terms.current.yearCode}FA`,
+      rowsUpdated: 1,
+    };
   }
 
 }
