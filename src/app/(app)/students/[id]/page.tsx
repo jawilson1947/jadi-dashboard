@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
+import { optionalFilter } from "@/server/api/query";
 import { getPrincipal } from "@/server/auth/session";
 import { hasPermission, requirePermission } from "@/server/authz/permissions";
 import { audit } from "@/server/audit/audit";
@@ -24,6 +25,9 @@ import { getAppStore } from "@/server/store";
 import { describeGaps } from "@/server/services/reclaim";
 import { canUpdateSemester, SEMESTER_UPDATE_MESSAGES } from "@/server/services/semester-update";
 import { canCheckClearance, CLEARANCE_CHECK_MESSAGES } from "@/server/services/clearance-check";
+import { parseReturnTo, withReturnTo } from "@/lib/return-to";
+import { getStudentNeighbors, type StudentNeighbors } from "@/server/services/student-neighbors";
+import { StudentPager } from "@/components/students/StudentPager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Student Profile" };
@@ -33,6 +37,9 @@ type Tab = (typeof TABS)[number];
 
 const paramsSchema = z.object({
   tab: z.enum(TABS).default("bio"),
+  // The result card this profile was opened from, so "Return to results" goes back to the list
+  // rather than to an empty search form. Validated, never trusted — see lib/return-to.
+  from: optionalFilter(z.string().max(400)),
   reveal: z.enum(["dob"]).optional(),
   scope: z.enum(["current", "global"]).default("global"),
   year: z.string().regex(/^\d{4}$/).optional(),
@@ -65,6 +72,14 @@ export default async function StudentProfilePage({
   const mayAnalyzeClearance = hasPermission(principal, "student.clearance.analyze");
   const revealDob = q.reveal === "dob" && mayReveal;
 
+  /**
+   * The return URL has to survive every move made inside the profile — switching tabs, revealing a
+   * date of birth, paging transactions — or "Return to results" would work only until the first
+   * click. So it rides along on every internal link.
+   */
+  const returnTo = parseReturnTo(q.from);
+  const withFrom = (href: string) => withReturnTo(href, returnTo);
+
   const profile = await getStudentProfile(id, principal, { revealDob });
   if (!profile) notFound();
 
@@ -72,6 +87,21 @@ export default async function StudentProfilePage({
   if (revealDob) await audit(principal, "student.pii_reveal", { targetType: "student", targetId: id, metadata: { field: "dob" } });
 
   const tab: Tab = (q.tab === "transactions" || q.tab === "payments") && !maySeeTransactions ? "bio" : q.tab === "clearance" && !mayAnalyzeClearance ? "bio" : q.tab;
+
+  /**
+   * Previous/Next across the result set this profile was opened from. Resolved after `tab`, so a
+   * step keeps the tab the reader is actually on rather than the one they asked for. A failure here
+   * costs the control, never the profile: a student whose neighbours are unreachable is still a
+   * student someone is trying to read.
+   */
+  let neighbors: StudentNeighbors | null = null;
+  if (returnTo) {
+    try {
+      neighbors = await getStudentNeighbors(returnTo, profile.idnumber, tab);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "warn", card: "pager", studentId: id, message: err instanceof Error ? err.message : String(err) }));
+    }
+  }
   const photoConfigured = Boolean(getConfig().STUDENT_PHOTO_SHARE);
   const base = `/students/${encodeURIComponent(id)}`;
 
@@ -102,7 +132,10 @@ export default async function StudentProfilePage({
         description={`Student ${profile.idnumber} · ${profile.classification}`}
         actions={
           <span className="flex items-center gap-3">
-            <Link href="/students" className="text-sm underline hover:no-underline">Back to search</Link>
+            {neighbors ? <StudentPager neighbors={neighbors} /> : null}
+            <Link href={returnTo ?? "/students"} className="text-sm underline hover:no-underline">
+              {returnTo ? "Return to results" : "Back to search"}
+            </Link>
             <PrintButton />
           </span>
         }
@@ -120,7 +153,7 @@ export default async function StudentProfilePage({
         {visibleTabs.map((t) => (
           <Link
             key={t.key}
-            href={`${base}?tab=${t.key}`}
+            href={withFrom(`${base}?tab=${t.key}`)}
             aria-current={tab === t.key ? "page" : undefined}
             className={`px-3 py-2 text-sm rounded-t-md ${tab === t.key ? "bg-surface-2 font-medium" : "text-ink-2 hover:bg-surface-2"}`}
           >
@@ -133,8 +166,9 @@ export default async function StudentProfilePage({
         <BioCard
           profile={profile}
           canReveal={mayReveal}
-          revealHref={`${base}?tab=bio&reveal=dob`}
-          hideHref={`${base}?tab=bio`}
+          revealHref={withFrom(`${base}?tab=bio&reveal=dob`)}
+          hideHref={withFrom(`${base}?tab=bio`)}
+          returnTo={returnTo}
           canUpdateSemester={hasPermission(principal, "student.update") && canUpdateSemester(profile.lastCleared, profile.lastClearedLabel)}
           semesterOutcome={q.semester ? { status: q.semester, message: SEMESTER_UPDATE_MESSAGES[q.semester] } : null}
           canCheckClearance={hasPermission(principal, "student.update") && canCheckClearance(profile.clearedCurrentSession)}
@@ -142,17 +176,25 @@ export default async function StudentProfilePage({
         />
       ) : null}
 
-      {tab === "transactions" ? await renderTransactions(id, q.scope, q.year, q.page, profile.currentTermRecord, base) : null}
+      {tab === "transactions" ? await renderTransactions(id, q.scope, q.year, q.page, profile.currentTermRecord, base, returnTo) : null}
 
       {tab === "payments" ? await renderPayments(id, profile.accountBalance) : null}
 
-      {tab === "clearance" ? await renderClearance(id, profile.lastClearedLabel) : null}
+      {tab === "clearance" ? await renderClearance(id, profile.lastClearedLabel, returnTo) : null}
     </>
   );
 }
 
 /** Bio Spec card 2. The current-semester card only exists for a student on the current term (1.4). */
-async function renderTransactions(id: string, scope: "current" | "global", year: string | undefined, page: number, currentTermRecord: boolean, base: string) {
+async function renderTransactions(
+  id: string,
+  scope: "current" | "global",
+  year: string | undefined,
+  page: number,
+  currentTermRecord: boolean,
+  base: string,
+  returnTo: string | null,
+) {
   const effectiveScope = scope === "current" && !currentTermRecord ? "global" : scope;
   try {
     const view = await getTransactionsView(id, { scope: effectiveScope, year, page });
@@ -160,6 +202,7 @@ async function renderTransactions(id: string, scope: "current" | "global", year:
       <TransactionsCard
         view={view}
         base={base}
+        returnTo={returnTo}
         currentTermAvailable={currentTermRecord}
         note={
           effectiveScope === "current"
@@ -219,7 +262,7 @@ async function renderPayments(id: string, accountBalance: number) {
 }
 
 /** Bio Spec cards 4–5 — the eligibility gate comes first, as the spec requires. */
-async function renderClearance(id: string, lastClearedLabel: string) {
+async function renderClearance(id: string, lastClearedLabel: string, returnTo: string | null) {
   try {
     return <ClearanceCard analysis={await getClearanceAnalysis(id)} />;
   } catch (err) {
@@ -229,7 +272,9 @@ async function renderClearance(id: string, lastClearedLabel: string) {
           <h2 className="text-sm font-medium text-ink-2">Financial clearance analysis</h2>
           <p className="text-sm">Financial clearance analysis is reserved for students enrolled in the current semester.</p>
           <p className="text-xs text-ink-3">This record was last cleared in: {lastClearedLabel}.</p>
-          <Link href="/students" className="text-sm underline hover:no-underline">Search for another student</Link>
+          <Link href={returnTo ?? "/students"} className="text-sm underline hover:no-underline">
+            {returnTo ? "Return to results" : "Search for another student"}
+          </Link>
         </div>
       );
     }

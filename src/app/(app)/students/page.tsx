@@ -21,6 +21,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { StudentSearchForm } from "@/components/students/StudentSearchForm";
 import { StateIcon, STATE_LEGEND } from "@/components/students/StateIcon";
 import { DataTable, type Column } from "@/components/tables/DataTable";
+import { rowAnchorId } from "@/lib/return-to";
 
 export const metadata = { title: "Student Lookup" };
 export const dynamic = "force-dynamic";
@@ -35,6 +36,8 @@ const paramsSchema = z.object({
   reclaim: optionalFilter(
     z.enum(["already_exists", "not_in_jenzabar", "no_name_record", "partial_not_allowed", "invalid_id", "unavailable"]),
   ),
+  // The row last opened from this result set, so returning from a profile lands on it (Bio 1.1).
+  sel: optionalFilter(z.string().max(20)),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce
     .number()
@@ -47,14 +50,21 @@ const paramsSchema = z.object({
  * Columns are deliberately not sortable. The provider already returns last name, first name, ID
  * order, and a sort control here would have to sort the fetched page set rather than the whole
  * match — an affordance that lies about its scope is worse than none.
+ *
+ * The ID link carries the current list URL in `?from=`, so the profile can send the reader back to
+ * this result card rather than to a blank search form. Built per render because the return URL
+ * depends on the search that produced these rows.
  */
-const COLUMNS: Column<StudentSearchResultRow>[] = [
+const columnsFor = (returnHref: (idnumber: string) => string): Column<StudentSearchResultRow>[] => [
   { key: "state", label: "Status", render: (r) => <StateIcon state={r.state} /> },
   {
     key: "idnumber",
     label: "Student ID",
     render: (r) => (
-      <Link href={`/students/${encodeURIComponent(r.idnumber)}`} className="underline hover:no-underline">
+      <Link
+        href={`/students/${encodeURIComponent(r.idnumber)}?from=${encodeURIComponent(returnHref(r.idnumber))}`}
+        className="underline hover:no-underline"
+      >
         {r.idnumber}
       </Link>
     ),
@@ -113,6 +123,15 @@ export default async function StudentLookupPage({ searchParams }: { searchParams
     if (v !== undefined && v !== "") query.set(k, String(v));
   }
 
+  /**
+   * Where a profile opened from this page should return to: this same result card, on this page,
+   * with the row just visited marked and anchored. Pinning page and pageSize matters — returning
+   * to page 1 of a ten-page result is exactly the retyping this is meant to remove.
+   */
+  const listHref = `/students?${query.toString()}&page=${result?.page ?? q.page}&pageSize=${result?.pageSize ?? q.pageSize}`;
+  const returnHref = (idnumber: string) =>
+    `${listHref}&sel=${encodeURIComponent(idnumber)}#${rowAnchorId(idnumber)}`;
+
   return (
     <>
       <PageHeader title="Student Lookup" description="Search by name or student ID. Selecting a result opens the student's profile." />
@@ -151,8 +170,10 @@ export default async function StudentLookupPage({ searchParams }: { searchParams
 
           <DataTable
             rows={result.rows}
-            columns={COLUMNS}
+            columns={columnsFor(returnHref)}
             rowKey={(r) => r.idnumber}
+            rowAnchorPrefix="row-"
+            highlightKey={q.sel ?? null}
             page={result.page}
             pageSize={result.pageSize}
             totalRows={result.totalRows}

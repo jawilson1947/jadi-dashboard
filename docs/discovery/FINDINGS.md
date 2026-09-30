@@ -227,3 +227,46 @@ reconciliation line is carrying close to a million dollars. Raised as **A-42**.
 Term buckets ($11,392,926) + unmatched residue ($971,656) = **$12,364,581**, which is the global
 receivable across 2,190 students exactly. Nothing is lost in the attribution; every dollar is
 somewhere. The question was only ever *where*.
+
+### 9.5 Corrections and additions from the full series (2026-09-30, `npm run ai:once`)
+
+Once M2 computed the whole paired series rather than the five years I had eyeballed, three things
+changed. Recorded here because §9.2's figures were drawn from a window, and a window chosen after
+seeing the data is how a pattern gets over-claimed.
+
+**The Spring:Fall ratio over ALL paired years is 1.75×, not 2.06×** — and two academic years are
+**inverted**:
+
+| Academic year | Spring ÷ Fall |
+|---|---|
+| 2015–16 | 3.45× |
+| 2016–17 | 2.39× |
+| 2017–18 | 2.23× |
+| 2018–19 | 3.33× |
+| **2019–20** | **0.69×** |
+| **2020–21** | **0.83×** |
+| 2021–22 | 2.77× |
+| 2022–23 | 2.43× |
+| 2023–24 | 1.62× |
+| 2024–25 | 1.63× |
+| 2025–26 | 1.99× |
+
+The pattern holds in nine years of eleven and **reverses in 2019–20 and 2020–21** — the two COVID
+years, where Fall carries more than the following Spring. So "Spring is higher" is a strong regular
+pattern with a documented exception, not a law; and the exception is itself evidence, since a shock
+that kept students enrolled through Spring (or stopped them leaving) is consistent with the
+attrition reading rather than against it.
+
+**Over half the entire receivable is owed by students who cleared and then did not come back.**
+`owedClearedNotReturned` totals **$6,303,558** — 61.3% of the $10,280,165 owed by students no longer
+enrolled, which is itself **90.2%** of the $11,392,926 resting on matched terms. Against the
+$12,364,581 global receivable that single category is roughly **51%**. This is the largest
+identified component of the receivable and it is exactly the population A-40's series would track.
+
+**The A-41 detector fires on its own.** M2 flags any term whose leaver money falls entirely in one
+category; run against staging it independently identifies Spring 2025, which is how the anomaly was
+found by hand. The check is in the module, so a future term with the same defect surfaces without
+anyone looking for it.
+
+R1 and R2 snapshots on staging at the time of this run: **33 unclassified students**, **63 freshman
+code mismatches of 394**.

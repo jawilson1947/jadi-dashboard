@@ -19,10 +19,27 @@ export const dynamic = "force-dynamic";
 const paramsSchema = z.object({
   population: z.enum(["enrolled", "cleared", "notCleared", "receivable", "dnc", "dnr"]).default("enrolled"),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(10).max(200).default(50),
+  // No default here: it depends on which population is being read (see PAGE_SIZE below). An
+  // unusable value falls back rather than 500ing a page reached by clicking a number.
+  pageSize: z.coerce.number().int().min(10).max(200).optional().catch(undefined),
   sort: z.enum(["lastName", "firstName", "accountBalance", "classificationCode", "status", "idnumber"]).default("lastName"),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
+
+/**
+ * Rows per page, by population.
+ *
+ * The three hero-card populations are read a screenful at a time — someone clicks a number on the
+ * Current Semester dashboard to look down the list, not to scroll a wall of 50. The balance-driven
+ * lists (receivable, DNC, DNR) are worked in bulk and keep the larger page. An explicit ?pageSize=
+ * still wins either way, so a link that asks for more is honoured.
+ */
+const PAGE_SIZE: Record<string, number> = {
+  enrolled: 10,
+  cleared: 10,
+  notCleared: 10,
+};
+const PAGE_SIZE_FALLBACK = 50;
 
 const TITLES: Record<string, string> = {
   enrolled: "Enrolled students",
@@ -62,13 +79,14 @@ const PRINT_COLUMNS: PrintColumn[] = [
 export default async function DrillDownPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const principal = requirePermission(await getPrincipal(), "student.view");
   const q = paramsSchema.parse(await searchParams);
-  const page = await getDrillDown(q.population, { page: q.page, pageSize: q.pageSize, sort: { field: q.sort, direction: q.direction } });
+  const pageSize = q.pageSize ?? PAGE_SIZE[q.population] ?? PAGE_SIZE_FALLBACK;
+  const page = await getDrillDown(q.population, { page: q.page, pageSize, sort: { field: q.sort, direction: q.direction } });
   const terms = await getCurrentTerms().catch(() => null);
   const tz = getConfig().APP_TIMEZONE;
   await audit(principal, "student.list_view", {
     targetType: "population",
     targetId: q.population,
-    metadata: { page: q.page, pageSize: q.pageSize, rowsReturned: page.rows.length, totalRows: page.totalRows, via: "page" },
+    metadata: { page: q.page, pageSize, rowsReturned: page.rows.length, totalRows: page.totalRows, via: "page" },
   });
 
   return (

@@ -31,9 +31,26 @@ interface DataTableProps<T> {
   baseHref: string;
   caption: string;
   emptyMessage?: string;
+  /** When set, each row gets id={`${rowAnchorPrefix}${rowKey(row)}`} so a link can scroll to it. */
+  rowAnchorPrefix?: string;
+  /** rowKey of the row to mark as the one last visited. Rendered as a highlight, not a selection. */
+  highlightKey?: string | null;
 }
 
-export function DataTable<T extends object>({ rows, columns, rowKey, page, pageSize, totalRows, sort, baseHref, caption, emptyMessage = "No rows." }: DataTableProps<T>) {
+export function DataTable<T extends object>({
+  rows,
+  columns,
+  rowKey,
+  page,
+  pageSize,
+  totalRows,
+  sort,
+  baseHref,
+  caption,
+  emptyMessage = "No rows.",
+  rowAnchorPrefix,
+  highlightKey = null,
+}: DataTableProps<T>) {
   const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
   const href = (p: number, s = sort?.field, d = sort?.direction) =>
     `${baseHref}&page=${p}&pageSize=${pageSize}${sort ? `&sort=${s}&direction=${d}` : ""}`;
@@ -77,15 +94,27 @@ export function DataTable<T extends object>({ rows, columns, rowKey, page, pageS
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
-                <tr key={rowKey(r)} className="border-t border-border hover:bg-surface-2">
-                  {columns.map((c) => (
-                    <td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.align === "right" ? "text-right tabular" : ""}`}>
-                      {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? "—")}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              rows.map((r) => {
+                const key = rowKey(r);
+                // Highlighted, not selected: it marks where the reader has been, and the row stays
+                // as clickable as any other. aria-current says the same thing to a screen reader.
+                const marked = highlightKey != null && key === highlightKey;
+                return (
+                  <tr
+                    key={key}
+                    id={rowAnchorPrefix ? `${rowAnchorPrefix}${key}` : undefined}
+                    aria-current={marked ? "true" : undefined}
+                    // scroll-mt keeps the anchored row clear of the sticky header when the browser jumps to it.
+                    className={`border-t border-border scroll-mt-24 ${marked ? "bg-brand-track" : "hover:bg-surface-2"}`}
+                  >
+                    {columns.map((c) => (
+                      <td key={c.key} className={`px-3 py-2 whitespace-nowrap ${c.align === "right" ? "text-right tabular" : ""}`}>
+                        {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? "—")}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

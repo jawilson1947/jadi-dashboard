@@ -21,6 +21,8 @@
     "test:staging": "cross-env VITEST_STAGING=1 vitest run",
     "snapshot:once": "cross-env DB_TARGET=staging tsx scripts/snapshot-once.ts",
     "snapshot:once:prod": "cross-env DB_TARGET=production tsx scripts/snapshot-once.ts",
+    "ai:once": "cross-env DB_TARGET=staging DATA_PROVIDER=mssql tsx scripts/ai-analysis-once.ts",
+    "ai:once:prod": "cross-env DB_TARGET=production DATA_PROVIDER=mssql tsx scripts/ai-analysis-once.ts",
     "bootstrap:admin": "cross-env DB_TARGET=staging tsx scripts/bootstrap-admin.ts",
     "bootstrap:admin:prod": "cross-env DB_TARGET=production tsx scripts/bootstrap-admin.ts",
     "reset:credentials": "cross-env DB_TARGET=staging tsx scripts/reset-credentials.ts",

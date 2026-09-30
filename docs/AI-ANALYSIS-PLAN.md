@@ -236,6 +236,16 @@ the buckets only ever hold leavers, the Fall/Spring ratio measures where in the 
 | 2025–26 | $327,777 (64) | $652,400 (148) | 1.99× |
 | **Total** | **$2,402,525** | **$4,937,569** | **2.06×** |
 
+**Corrected on the full series** (FINDINGS §9.5): over all eleven paired years the ratio is
+**1.75×**, and **2019–20 (0.69×) and 2020–21 (0.83×) are inverted** — the COVID years run the other
+way. The pattern holds in nine years of eleven, so M2 must state it as a strong regular pattern with
+a documented exception rather than a rule. The exception supports rather than undermines the
+attrition reading: a shock that stopped students leaving after Spring is what it would look like.
+
+Also measured: **$6,303,558 — roughly 51% of the entire $12.36M receivable — is owed by students who
+cleared and then did not return.** That is the largest identified component of the receivable, and
+it is precisely the population A-40's series would track.
+
 Money and headcount both roughly double. The claim M2 should make is therefore **"students who
 leave owing money overwhelmingly leave after a Spring term"** — attrition, pointing at retention,
 not at Spring billing. Within the leavers the DNR shape (cleared, then gone) is the majority of the

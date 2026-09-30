@@ -22,6 +22,7 @@ export function BioCard({
   semesterOutcome = null,
   canCheckClearance = false,
   clearanceOutcome = null,
+  returnTo = null,
 }: {
   profile: StudentProfile;
   canReveal: boolean;
@@ -35,6 +36,8 @@ export function BioCard({
   canCheckClearance?: boolean;
   /** Result of the clearance check the user just ran, carried back through the redirect. */
   clearanceOutcome?: { status: string; message: string } | null;
+  /** Result card to return to. Posted with the write actions so their 303 does not drop it. */
+  returnTo?: string | null;
 }) {
   const a = profile.address;
   // Step 4: when Jenzabar holds no current-term registration, the label itself carries the answer.
@@ -87,6 +90,7 @@ export function BioCard({
             // POST, not a link: it writes to source data, and must not be reachable by prefetch.
             <form method="post" action="/api/v1/students/semester" className="mt-2 no-print">
               <input type="hidden" name="id" value={profile.idnumber} />
+              {returnTo ? <input type="hidden" name="from" value={returnTo} /> : null}
               <button
                 type="submit"
                 className="rounded-md border border-brand text-brand px-3 py-1 text-xs hover:bg-brand-track"
@@ -123,6 +127,7 @@ export function BioCard({
             // POST, not a link: it writes to source data, and must not be reachable by prefetch.
             <form method="post" action="/api/v1/students/clearance-check" className="mt-2 no-print">
               <input type="hidden" name="id" value={profile.idnumber} />
+              {returnTo ? <input type="hidden" name="from" value={returnTo} /> : null}
               <button
                 type="submit"
                 className="rounded-md border border-brand text-brand px-3 py-1 text-xs hover:bg-brand-track"

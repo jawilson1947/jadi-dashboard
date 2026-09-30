@@ -14,7 +14,10 @@ Everything here is idempotent: rerunning a script adds what is missing and chang
 | `02_schema.sql` | production | All tables, indexes, constraints and role/permission seeds; writes the baseline ledger rows |
 | `03_seed_jobs.sql` | production | The 10 job definitions (seeded by the worker in dev; by T-SQL here) |
 | `04_import_from_staging.sql` | production | Restores `dash_export.bak` and copies the rows into `dash.*` in FK order |
-| `05_verify.sql` | production | Read-only PASS/FAIL audit — objects, seeds, integrity, grants |
+| `05_verify.sql` | production | Read-only PASS/FAIL audit — objects, procedures, seeds, integrity, grants |
+| `10_usp_reclaim_student.sql` | production | `dbo.usp_ReclaimStudentFromJenzabar` + its `GRANT EXECUTE` (migration 005) |
+| `11_usp_update_student_semester.sql` | production | `dbo.usp_UpdateStudentSemester` + its `GRANT EXECUTE` (migration 006) |
+| `12_usp_check_clearance.sql` | production | `dbo.usp_CheckStudentClearance` + its `GRANT EXECUTE` (migration 007) |
 | `99_undo_dash_in_master.sql` | either | Recovery: removes a `dash` schema accidentally built in `master` |
 | `_template_migration.sql` | — | Copy this for every future change |
 
@@ -38,6 +41,11 @@ sqlcmd -S PRODSQL -d ousadb -E -b -I -i 05_verify.sql
 
 `-b` makes sqlcmd exit non-zero on error and `-I` enables quoted identifiers — both are
 required. Review every `FAIL` from `05_verify.sql` before starting the services.
+
+The `10`–`12` procedure scripts are owned by `dbo` and run as sysadmin, so they sit outside the
+migration ledger and write no `dash.SchemaMigration` row. `05_verify.sql` §1b and §1c check them
+directly — §1b that each procedure exists, §1c that `jadi_dash` still holds `EXECUTE` on it. All
+three are idempotent, so the fix for any `FAIL` there is simply to re-run that script.
 
 ### Running these in SSMS instead of sqlcmd
 

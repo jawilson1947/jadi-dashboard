@@ -1,8 +1,8 @@
 /*===========================================================================
   05_verify.sql — post-deployment verification
   ---------------------------------------------------------------------------
-  Read-only. Run after 01-04. Every section prints PASS or FAIL; nothing is
-  changed. Run it again any time to audit the production dash schema.
+  Read-only. Run after 01-04 and 10-12. Every section prints PASS or FAIL;
+  nothing is changed. Run it again any time to audit the production dash schema.
 
   RUN AS:  sysadmin, on the PRODUCTION instance
   RUN VIA: sqlcmd -S PRODSQL -d ousadb -E -b -I -i 05_verify.sql
@@ -38,7 +38,49 @@ LEFT JOIN sys.tables t ON t.name = e.name AND SCHEMA_NAME(t.schema_id) = 'dash'
 ORDER BY status DESC, e.name;
 GO
 
-PRINT '=== 2. Migration ledger ===';
+PRINT '=== 1b. Stored procedures (db/production/10-12) ===';
+/*  These three scripts write NO dash.SchemaMigration row, so section 2 below
+    cannot tell you whether they have been applied. Check the objects directly.
+    All three are idempotent - re-run the script for any FAIL.                */
+;WITH expected(name, source_file) AS (SELECT * FROM (VALUES
+  ('usp_ReclaimStudentFromJenzabar', '10_usp_reclaim_student.sql'),
+  ('usp_UpdateStudentSemester',      '11_usp_update_student_semester.sql'),
+  ('usp_CheckStudentClearance',      '12_usp_check_clearance.sql')) v(name, source_file))
+SELECT e.name AS procedure_name,
+       e.source_file,
+       CASE WHEN p.object_id IS NULL THEN 'FAIL - MISSING, run the script'
+            ELSE 'PASS' END AS status,
+       p.modify_date AS last_applied
+FROM expected e
+LEFT JOIN sys.procedures p
+       ON p.name = e.name AND SCHEMA_NAME(p.schema_id) = 'dbo'
+ORDER BY status DESC, e.name;
+GO
+
+PRINT '=== 1c. EXECUTE on those procedures granted to jadi_dash ===';
+/*  Each script ends with its own GRANT EXECUTE. A procedure that exists with no
+    grant is a half-applied script: the app will fail at call time, not at start. */
+;WITH expected(name) AS (SELECT * FROM (VALUES
+  ('usp_ReclaimStudentFromJenzabar'),
+  ('usp_UpdateStudentSemester'),
+  ('usp_CheckStudentClearance')) v(name))
+SELECT e.name AS procedure_name,
+       CASE WHEN DATABASE_PRINCIPAL_ID('jadi_dash') IS NULL THEN 'FAIL - user jadi_dash not in this database'
+            WHEN p.object_id IS NULL      THEN 'SKIP - procedure missing (see 1b)'
+            WHEN dp.state_desc = 'GRANT'  THEN 'PASS'
+            WHEN dp.state_desc IS NOT NULL THEN 'FAIL - ' + dp.state_desc
+            ELSE 'FAIL - no EXECUTE for jadi_dash' END AS status
+FROM expected e
+LEFT JOIN sys.procedures p
+       ON p.name = e.name AND SCHEMA_NAME(p.schema_id) = 'dbo'
+LEFT JOIN sys.database_permissions dp
+       ON dp.class = 1 AND dp.major_id = p.object_id AND dp.minor_id = 0
+      AND dp.permission_name = 'EXECUTE'
+      AND dp.grantee_principal_id = DATABASE_PRINCIPAL_ID('jadi_dash')
+ORDER BY status DESC, e.name;
+GO
+
+PRINT '=== 2. Migration ledger (tables only - see 1b for the procedures) ===';
 SELECT name, appliedAt FROM dash.SchemaMigration ORDER BY name;
 GO
 

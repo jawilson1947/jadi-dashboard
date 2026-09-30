@@ -9,6 +9,8 @@ import { HeroCard } from "@/components/cards/HeroCard";
 import { ChargesCreditsCard, DnrDncCard, ReceivableCard } from "@/components/cards/SummaryCards";
 import { ClearanceBreakdownCard } from "@/components/cards/ClearanceBreakdownCard";
 import { PrintButton } from "@/components/print/PrintButton";
+import { RefreshPageButton } from "@/components/dashboard/RefreshPageButton";
+import { DASHBOARD_REFRESH_JOBS } from "@/server/services/dashboard-refresh";
 import { PrintHeader } from "@/components/print/PrintHeader";
 
 export const metadata = { title: "Current Semester" };
@@ -33,7 +35,14 @@ export default async function DashboardPage() {
       <PageHeader
         title={`Current Semester — ${dashboard.term.label}`}
         description={`Terms ${dashboard.term.currentKeys.join(" / ")} · previous ${dashboard.term.previousKeys.join(" / ")} · source: ${src.provider} via ${src.store} snapshots${src.latestCapturedAt ? ` · latest capture ${formatDateTime(src.latestCapturedAt, tz)}` : ""}`}
-        actions={<PrintButton />}
+        actions={
+          <span className="flex items-center gap-3">
+            {/* Refresh sits LEFT of Print: it changes the page, Print captures it, and that is the
+                order the two are used in. */}
+            <RefreshPageButton jobs={DASHBOARD_REFRESH_JOBS.map((j) => ({ key: j.key, label: j.label }))} />
+            <PrintButton />
+          </span>
+        }
       />
       <PrintHeader title="Current Semester Dashboard" subtitle={`Terms ${dashboard.term.currentKeys.join(" / ")} · previous ${dashboard.term.previousKeys.join(" / ")}`} semester={dashboard.term.label} capturedAt={src.latestCapturedAt} printedBy={principal.displayName} timeZone={tz} />
 

@@ -12,17 +12,22 @@ import { formatCurrency, formatIsoDateSafe } from "@/lib/format";
 export function TransactionsCard({
   view,
   base,
+  returnTo = null,
   currentTermAvailable,
   note,
 }: {
   view: TransactionsView;
   base: string;
+  /** Result card to return to, threaded onto this card's own links so it is not dropped. */
+  returnTo?: string | null;
   currentTermAvailable: boolean;
   note: string;
 }) {
-  const scopeHref = (scope: "current" | "global") => `${base}?tab=transactions&scope=${scope}`;
-  const yearHref = (year: string) => `${base}?tab=transactions&scope=${view.scope}&year=${year}`;
-  const pageHref = (page: number) => `${base}?tab=transactions&scope=${view.scope}${view.year ? `&year=${view.year}` : ""}&page=${page}`;
+  const carry = returnTo ? `&from=${encodeURIComponent(returnTo)}` : "";
+  const scopeHref = (scope: "current" | "global") => `${base}?tab=transactions&scope=${scope}${carry}`;
+  const yearHref = (year: string) => `${base}?tab=transactions&scope=${view.scope}&year=${year}${carry}`;
+  const pageHref = (page: number) =>
+    `${base}?tab=transactions&scope=${view.scope}${view.year ? `&year=${view.year}` : ""}&page=${page}${carry}`;
   const pageCount = Math.max(1, Math.ceil(view.totalRows / view.pageSize));
 
   return (

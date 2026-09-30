@@ -147,3 +147,43 @@ html, body {
   body.print-all-rows .paged-table { display: none !important; }
   body.print-all-rows .print-all-rows-table { display: block; }
 }
+
+/* ── Refresh indicator (Current Semester dashboard) ─────────────────────────
+   A spinner and a determinate progress bar. Both are decorative: the state is
+   announced in text through aria-live, so a reader that ignores animation loses
+   nothing. Under prefers-reduced-motion the spinner stops turning and the bar
+   stops sliding — the elements stay, so layout does not jump, but nothing moves
+   for someone who asked for that. */
+@keyframes jadi-spin { to { transform: rotate(360deg); } }
+
+.jadi-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  animation: jadi-spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+.jadi-progress {
+  height: 3px;
+  width: 100%;
+  background: var(--color-surface-2, rgba(127, 127, 127, 0.2));
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.jadi-progress > span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  border-radius: 9999px;
+  transition: width 240ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jadi-spinner { animation: none; }
+  .jadi-progress > span { transition: none; }
+}
