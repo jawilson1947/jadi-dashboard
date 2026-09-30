@@ -22,6 +22,8 @@ export type AuditAction =
   | "student.transactions_view"
   | "student.clearance_analyze"
   | "ai.notice_draft"
+  // Phase 8: an analysis read. Records the module and whether the prose came from a model at all.
+  | "ai.analysis_view"
   | "worksheet.view"
   | "export.create"
   // Phase 7a. A report read is student-level (A-30), so it is audited like a profile view: the

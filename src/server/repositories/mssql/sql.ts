@@ -246,6 +246,59 @@ WHERE AccountBalance > 0
 GROUP BY ISNULL(LastCleared, '')
 ORDER BY 1;`,
 
+  /**
+   * Phase 8 M2 — the semester receivable, decomposed (AI-ANALYSIS-PLAN section 4.2, A-39).
+   *
+   * receivablesByTerm above gives one total per bucket, and A-39 established that the total is NOT
+   * "the receivable for that semester": LastCleared holds one value per student and is overwritten
+   * on every roll, so a balance rests under a term only while that record stopped there. Measured
+   * on staging 2026-09-30, stillEnrolled is 0 for every past term -- the buckets contain nothing
+   * but leavers.
+   *
+   * This splits each bucket so the narrative can say WHICH kind of money it is:
+   *   owedByEnrolled          live debt on active students -- collections and clearance
+   *   owedClearedNotReturned  cleared, then gone -- the DNR shape, and the majority in most terms
+   *   owedNeverClearedGone    never got through the gate, and left
+   *
+   * LEFT JOIN rather than EXISTS inside the aggregate: SQL Server rejects a subquery within SUM()
+   * (error 130), which is how the first draft of this failed.
+   */
+  receivableDecomposition: `
+WITH enrolled AS (SELECT DISTINCT idnumber FROM dbo.VIEW_OURM)
+SELECT o.SemesterName                                           AS semesterName,
+       MIN(o.SemesterBegins)                                    AS termBegins,
+       COUNT(*)                                                 AS students,
+       SUM(s.AccountBalance)                                    AS owed,
+       SUM(CASE WHEN e.idnumber IS NOT NULL THEN 1 ELSE 0 END)  AS stillEnrolled,
+       SUM(CASE WHEN e.idnumber IS NOT NULL THEN s.AccountBalance ELSE 0 END) AS owedByEnrolled,
+       SUM(CASE WHEN e.idnumber IS NULL     THEN s.AccountBalance ELSE 0 END) AS owedByNotEnrolled,
+       SUM(CASE WHEN ISNULL(s.ClearedCurrentSession, 0) = 1 AND e.idnumber IS NULL
+                THEN s.AccountBalance ELSE 0 END)               AS owedClearedNotReturned,
+       SUM(CASE WHEN ISNULL(s.ClearedCurrentSession, 0) = 0 AND e.idnumber IS NULL
+                THEN s.AccountBalance ELSE 0 END)               AS owedNeverClearedGone
+FROM dbo.tblStudent AS s
+JOIN dbo.tblOUSA AS o ON s.LastCleared IN (o.JADI_TradName, o.JADI_LeapName)
+LEFT JOIN enrolled AS e ON e.idnumber = s.idnumber
+WHERE s.AccountBalance > 0
+GROUP BY o.SemesterName
+ORDER BY MIN(o.SemesterBegins);`,
+
+  /**
+   * Phase 8 M5 — debit balances on term codes that match no tblOUSA row (A-42).
+   *
+   * Measured at $971,656 across 166 students on 2026-09-30, $807,010 of it on the XX0000 sentinel
+   * and the rest across 41 codes back to SP1998 plus an unrecognised LM2025 family. That is 7.9% of
+   * the global receivable and it is absent from every semester chart, so the data-quality briefing
+   * leads with it rather than footnoting it.
+   */
+  unmatchedTermResidue: `
+SELECT ISNULL(s.LastCleared, '') AS termKey, COUNT(*) AS students, SUM(s.AccountBalance) AS owed
+FROM dbo.tblStudent AS s
+WHERE s.AccountBalance > 0
+  AND NOT EXISTS (SELECT 1 FROM dbo.tblOUSA o WHERE s.LastCleared IN (o.JADI_TradName, o.JADI_LeapName))
+GROUP BY ISNULL(s.LastCleared, '')
+ORDER BY SUM(s.AccountBalance) DESC;`,
+
   /** Drill-down populations as WHERE fragments over alias S (tblStudent) with cur/prev and #enrolled/#cleared available. */
   populationWhere: {
     enrolled: `EXISTS (SELECT 1 FROM #enrolled e WHERE e.idnumber = S.idnumber)`,

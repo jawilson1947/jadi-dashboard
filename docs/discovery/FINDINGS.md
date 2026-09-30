@@ -150,3 +150,80 @@ Sprint counting rule (implemented in `Q.sprintPrelude`): each student is counted
 ### 8.7 Remaining follow-ups
 - Narrow the `VIEW_OURM_TRANS_HIST` SOURCE_CDE query (e.g. `TOP` by month) or run it against `[jadi].dbo.trans_hist` with a term filter.
 - Confirm with the DBA where `[172.18.96.11]\TMSEPRD` and `[JICSSQL]` point on staging.
+
+---
+
+## 9. Phase 8 baseline measurements (2026-09-30)
+
+Run against staging (`192.168.0.6`, `ousadb`) with `scripts/run-sql.mjs`, from
+`db/sql/AI_M1_HistoricalCoverage.sql` and `db/sql/AI_Q7_SpringAttribution.sql`. Read-only.
+These answer the two questions `AI-ANALYSIS-PLAN.md` said had to be settled before Phase 8 was
+worth costing.
+
+### 9.1 `tblOUSA` census / FinanciallyCleared coverage — M1 has a basis
+
+28 term rows; **26 carry both `census` and `FinanciallyCleared`**, from 2015-01-01 to 2026-06-17.
+The two blanks are Summer 2026 and Spring 2027 — future terms, legitimately uncaptured. This closes
+the follow-up `HISTORICAL-PLAN.md` §8 left open: eleven years of series exist and M1 is not
+starting from three points.
+
+**The trend is enrolment, not clearance.**
+
+| | 2015 | 2026 | Change |
+|---|---|---|---|
+| Fall census | 1,989 | 1,186 | **−40.4%** |
+| Spring census | 1,919 | 1,222 | **−36.3%** |
+| Clearance rate | 88.5–90.8% | 85.3–94.2% | **flat** |
+
+Across all 24 non-summer terms the clearance rate stays inside 85.0–94.2% with no direction. The
+receivable pressure this project exists to analyse is therefore a **demand** problem, not a
+clearance-performance problem, and any mitigation narrative that proposes "clear students faster"
+is answering a question the data does not ask. Summer terms behave differently (55.6% in 2025) and
+are excluded per A-23.
+
+### 9.2 Receivable by term — A-39 confirmed, and the Spring pattern is real
+
+`stillEnrolled` is **0 for every past term**. Every debit balance resting on a prior term belongs to
+a student no longer enrolled; only the current term (Fall 2026, 267 students, $1,111,403) and one
+straggler in Spring 2026 are live. A-39 is therefore confirmed as measured fact: §9.3's buckets are
+**leaver buckets**, and "receivable for semester X" was never what the chart showed.
+
+That does not refute the Spring hypothesis — it sharpens it. If the buckets only ever contain
+leavers, the Fall/Spring ratio measures **where in the academic year students stop owing money**:
+
+| Academic year | Fall bucket | Following Spring | Ratio |
+|---|---|---|---|
+| 2021–22 | $384,838 (67) | $1,065,713 (180) | 2.77× |
+| 2022–23 | $594,640 (78) | $1,442,587 (205) | 2.43× |
+| 2023–24 | $695,668 (102) | $1,125,799 (174) | 1.62× |
+| 2024–25 | $399,602 (72) | $651,070 (115) | 1.63× |
+| 2025–26 | $327,777 (64) | $652,400 (148) | 1.99× |
+| **Five-year total** | **$2,402,525** | **$4,937,569** | **2.06×** |
+
+Both the money and the headcount roughly double. The finding is **not** "Spring semesters generate
+more receivable" — it is **students who leave owing money overwhelmingly leave after a Spring
+term**, which is an attrition finding and points at retention rather than at billing.
+
+Within the leavers, `ClearedCurrentSession = 1` — cleared, then did not return, the DNR shape — is
+the majority of the money in most terms (Spring 2022 83.0%, Fall 2022 74.9%, Fall 2025 70.6%,
+Spring 2023 65.2%, Spring 2026 57.1%). It is not cleanly seasonal; both Fall and Spring buckets are
+DNR-dominated. The seasonality is in the **volume**, not in the mix.
+
+### 9.3 Two anomalies found in passing
+
+**Spring 2025 carries $651,070 across 115 students with zero cleared-not-returned** — 100% "never
+cleared and gone", where every neighbouring term is a mix (Fall 2024 37.5% cleared-not-returned,
+Spring 2026 57.1%). Either the roll did not run for that cohort or `ClearedCurrentSession` was
+reset. A trend line drawn through this term would be wrong. Raised as **A-41**.
+
+**$971,656 across 166 students sits on term codes matching no `tblOUSA` row** — $807,010 of it on
+the `XX0000` sentinel, the remainder spread over 41 codes back to `SP1998`, plus an unrecognised
+`LM2025` family that fits neither the Trad/Leap nor the Summer naming pattern. That is **7.9% of
+the $12,364,581 global receivable**, invisible to every semester chart. A-23's "Excluded terms"
+reconciliation line is carrying close to a million dollars. Raised as **A-42**.
+
+### 9.4 Reconciliation
+
+Term buckets ($11,392,926) + unmatched residue ($971,656) = **$12,364,581**, which is the global
+receivable across 2,190 students exactly. Nothing is lost in the attribution; every dollar is
+somewhere. The question was only ever *where*.

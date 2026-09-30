@@ -7,7 +7,7 @@ import type {
   UnclassifiedRow,
 } from "../repositories/types";
 import { classificationDisplayName } from "../metadata/classifications";
-import { getReportDefinition, type ReportDefinition, type ReportKey } from "../reports/definitions";
+import { requireReport, type ReportDefinition } from "../reports/definitions";
 import { loadContacts, loadSnapshotRows, type ReportDeps, type ReportSnapshotMeta } from "../reports/snapshot";
 import { audit } from "../audit/audit";
 import type { Principal } from "../authz/permissions";
@@ -443,12 +443,6 @@ export async function getCurrentlyClearedView(deps: ReportDeps = {}): Promise<Cu
 }
 
 /* ─────────────────────────────────── shared ─────────────────────────────────── */
-
-function requireReport(key: ReportKey): ReportDefinition {
-  const def = getReportDefinition(key);
-  if (!def) throw new Error(`Unknown report ${key}`);
-  return def;
-}
 
 /**
  * Audit a report view (A-30). The report key and the row count are recorded; the rows never are.

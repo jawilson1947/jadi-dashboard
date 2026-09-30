@@ -196,6 +196,34 @@ export interface ReceivableByTermRow {
   positiveBalance: number;
 }
 
+/**
+ * Phase 8 M2 — one semester bucket of the receivable, split by what kind of money it is.
+ *
+ * A-39: the bucket is NOT "the receivable for that semester". It is today's debit balance owed by
+ * students whose record rests on that term, and measurement showed those are leavers in every past
+ * term. The split is what lets the analysis say so instead of implying otherwise.
+ */
+export interface ReceivableDecompositionRow {
+  semesterName: string;
+  termBegins: Date | null;
+  students: number;
+  owed: number;
+  /** Students in this bucket present in VIEW_OURM — i.e. enrolled NOW, not in the term named. */
+  stillEnrolled: number;
+  owedByEnrolled: number;
+  owedByNotEnrolled: number;
+  /** Cleared (A-22a, for the term named) and gone — the DNR shape. */
+  owedClearedNotReturned: number;
+  owedNeverClearedGone: number;
+}
+
+/** Phase 8 M5 — a debit balance on a term code matching no tblOUSA row (A-42). */
+export interface UnmatchedTermRow {
+  termKey: string;
+  students: number;
+  owed: number;
+}
+
 /* ─────────────────────────── Phase 5 — Student subsystem (Bio Spec) ─────────────────────────── */
 
 /**
@@ -540,6 +568,12 @@ export interface DataProvider {
    * DataSourceUnavailableError when the procedure is not installed.
    */
   checkStudentClearance(id: StudentKey, actor: string): Promise<ClearanceCheckResult>;
+
+  /* ── Phase 8 — AI analyses (docs/AI-ANALYSIS-PLAN.md) ── */
+  /** M2. The semester receivable split by enrolled / cleared-and-gone / never-cleared (A-39). */
+  getReceivableDecomposition(): Promise<ReceivableDecompositionRow[]>;
+  /** M5. Debit balances on term codes that resolve to no semester (A-42). */
+  getUnmatchedTermResidue(): Promise<UnmatchedTermRow[]>;
 
   /* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
   /** Why this id is missing from tblStudent. Read-only, sub-second, safe on any lookup miss. */

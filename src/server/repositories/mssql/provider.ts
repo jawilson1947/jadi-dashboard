@@ -39,6 +39,8 @@ import type {
   ReclaimOutcome,
   SemesterUpdateResult,
   ClearanceCheckResult,
+  ReceivableDecompositionRow,
+  UnmatchedTermRow,
   ClearanceCheckOutcome,
   SemesterUpdateOutcome,
 } from "../types";
@@ -242,6 +244,32 @@ export class MssqlDataProvider implements DataProvider {
   async getReceivablesByTerm(): Promise<ReceivableByTermRow[]> {
     const r = await (await this.pool()).request().query<{ termKey: string; students: number; positiveBalance: number }>(Q.receivablesByTerm);
     return r.recordset.map((row) => ({ termKey: (row.termKey ?? "").trim(), students: Number(row.students), positiveBalance: money(row.positiveBalance) }));
+  }
+
+  /* ── Phase 8 — AI analyses (docs/AI-ANALYSIS-PLAN.md) ── */
+
+  async getReceivableDecomposition(): Promise<ReceivableDecompositionRow[]> {
+    const r = await (await this.pool()).request().query<RawDecomposition>(Q.receivableDecomposition);
+    return r.recordset.map((x) => ({
+      semesterName: (text(x.semesterName) ?? "").trim(),
+      termBegins: x.termBegins ? new Date(x.termBegins) : null,
+      students: Number(x.students ?? 0),
+      owed: money(x.owed),
+      stillEnrolled: Number(x.stillEnrolled ?? 0),
+      owedByEnrolled: money(x.owedByEnrolled),
+      owedByNotEnrolled: money(x.owedByNotEnrolled),
+      owedClearedNotReturned: money(x.owedClearedNotReturned),
+      owedNeverClearedGone: money(x.owedNeverClearedGone),
+    }));
+  }
+
+  async getUnmatchedTermResidue(): Promise<UnmatchedTermRow[]> {
+    const r = await (await this.pool()).request().query<{ termKey: string; students: number; owed: number }>(Q.unmatchedTermResidue);
+    return r.recordset.map((x) => ({
+      termKey: (text(x.termKey) ?? "").trim(),
+      students: Number(x.students ?? 0),
+      owed: money(x.owed),
+    }));
   }
 
   /* ── Phase 5 — Student subsystem (Bio Spec; docs/STUDENT-PLAN.md) ── */
@@ -764,6 +792,7 @@ interface RawCurrentlyCleared { idnumber: string | number; classCode: string; ra
 interface RawDiagnostic { inTblStudent: number; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; addressRows: number; qualifyingAddressRows: number; addressCodes: string | null; lastName: string | null; firstName: string | null; middleName: string | null; email: string | null; city: string | null; stateCode: string | null }
 interface RawReclaim { outcome: string; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; hasQualifyingAddress: number; addressRows: number; rowsInserted: number }
 interface RawSemesterUpdate { outcome: string; lastCleared: string | number | null; exPeriod: string | number | null; rowsUpdated: number }
+interface RawDecomposition { semesterName: string | null; termBegins: string | Date | null; students: number; owed: number; stillEnrolled: number; owedByEnrolled: number; owedByNotEnrolled: number; owedClearedNotReturned: number; owedNeverClearedGone: number }
 interface RawClearanceCheck { outcome: string; lastCleared: string | null; clearedOn: string | number | null; clearedBy: string | null; rowsUpdated: number }
 interface RawContact { idnumber: string | number; lastname: string | null; firstname: string | null; email: string | number | null; AccountBalance: number | string | null }
 

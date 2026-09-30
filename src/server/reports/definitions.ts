@@ -154,6 +154,13 @@ export const REPORT_DEFINITIONS: readonly ReportDefinition[] = [
   },
 ];
 
+/** The definition, or a throw. For callers that already know the key is a ReportKey. */
+export function requireReport(key: ReportKey): ReportDefinition {
+  const def = getReportDefinition(key);
+  if (!def) throw new Error(`Unknown report ${key}`);
+  return def;
+}
+
 export function getReportDefinition(key: string): ReportDefinition | null {
   return REPORT_DEFINITIONS.find((r) => r.key === key) ?? null;
 }

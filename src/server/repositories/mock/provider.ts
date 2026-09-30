@@ -40,6 +40,8 @@ import type {
   ReclaimResult,
   SemesterUpdateResult,
   ClearanceCheckResult,
+  ReceivableDecompositionRow,
+  UnmatchedTermRow,
 } from "../types";
 import { resolveTerms } from "../types";
 import { generateSyntheticDataset, generateTransactions, type SyntheticDataset } from "./synthetic";
@@ -606,6 +608,56 @@ export class MockDataProvider implements DataProvider {
       clearedBy: student.clearedBy,
       rowsUpdated: 1,
     };
+  }
+
+  /* ── Phase 8 — AI analyses (docs/AI-ANALYSIS-PLAN.md) ── */
+
+  async getReceivableDecomposition(): Promise<ReceivableDecompositionRow[]> {
+    const terms = resolveTerms(this.data.terms);
+    const enrolled = new Set(this.data.students.filter((s) => s.enrolledCurrentTerm).map((s) => s.idnumber));
+    const byTerm = new Map<string, ReceivableDecompositionRow>();
+
+    for (const student of this.data.students) {
+      if (student.accountBalance <= 0 || !student.lastCleared) continue;
+      const term = this.data.terms.find((t) => student.lastCleared === t.tradName || student.lastCleared === t.leapName);
+      if (!term) continue; // the A-42 residue; getUnmatchedTermResidue reports it separately
+      const row = byTerm.get(term.semesterName) ?? {
+        semesterName: term.semesterName,
+        termBegins: term.semesterBegins ? new Date(term.semesterBegins) : null,
+        students: 0, owed: 0, stillEnrolled: 0, owedByEnrolled: 0,
+        owedByNotEnrolled: 0, owedClearedNotReturned: 0, owedNeverClearedGone: 0,
+      };
+      const live = enrolled.has(student.idnumber);
+      const cleared = student.status === "Cleared";
+      row.students += 1;
+      row.owed = round2(row.owed + student.accountBalance);
+      if (live) {
+        row.stillEnrolled += 1;
+        row.owedByEnrolled = round2(row.owedByEnrolled + student.accountBalance);
+      } else {
+        row.owedByNotEnrolled = round2(row.owedByNotEnrolled + student.accountBalance);
+        if (cleared) row.owedClearedNotReturned = round2(row.owedClearedNotReturned + student.accountBalance);
+        else row.owedNeverClearedGone = round2(row.owedNeverClearedGone + student.accountBalance);
+      }
+      byTerm.set(term.semesterName, row);
+    }
+    void terms;
+    return [...byTerm.values()].sort((a, b) => (a.termBegins?.getTime() ?? 0) - (b.termBegins?.getTime() ?? 0));
+  }
+
+  async getUnmatchedTermResidue(): Promise<UnmatchedTermRow[]> {
+    const byKey = new Map<string, UnmatchedTermRow>();
+    for (const student of this.data.students) {
+      if (student.accountBalance <= 0) continue;
+      const matched = this.data.terms.some((t) => student.lastCleared === t.tradName || student.lastCleared === t.leapName);
+      if (matched) continue;
+      const key = student.lastCleared ?? "";
+      const row = byKey.get(key) ?? { termKey: key, students: 0, owed: 0 };
+      row.students += 1;
+      row.owed = round2(row.owed + student.accountBalance);
+      byKey.set(key, row);
+    }
+    return [...byKey.values()].sort((a, b) => b.owed - a.owed);
   }
 
 }
