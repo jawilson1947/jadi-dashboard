@@ -167,12 +167,28 @@ export interface WhatIfPoint {
   mismatches: number;
 }
 
-export interface FreshmanView {
-  rows: FreshmanTableRow[];
+/**
+ * One semester's slice of R2. The report covers the current AND previous term (R-D2a), and each
+ * tblOUSA row carries its OWN SemesterBegins, so the boundary chart and the what-if are per-term:
+ * moving the current term's start date does nothing to the previous term's mismatches, and a
+ * single combined boundary would be a date that belongs to neither.
+ */
+export interface FreshmanTermGroup {
+  semesterName: string;
+  isCurrentTerm: boolean;
   semesterBegins: Date | null;
+  students: number;
   mismatches: number;
   buckets: CreationBucket[];
   whatIf: WhatIfPoint[];
+}
+
+export interface FreshmanView {
+  rows: FreshmanTableRow[];
+  /** Current term first, then previous. Empty terms are not carried. */
+  terms: FreshmanTermGroup[];
+  /** Across both terms. */
+  mismatches: number;
   meta: ReportSnapshotMeta;
   contactsReadAt: Date;
 }
@@ -244,16 +260,43 @@ export async function getFreshmanView(deps: ReportDeps = {}): Promise<FreshmanVi
   }));
   const contacts = await loadContacts(population.map((r) => r.idnumber), deps);
   const rows = joinContacts(population, contacts);
-  const semesterBegins = population.find((r) => r.semesterBegins)?.semesterBegins ?? null;
   return {
     rows,
-    semesterBegins,
+    terms: buildFreshmanTerms(population),
     mismatches: population.filter((r) => r.mismatch).length,
-    buckets: buildCreationBuckets(population, semesterBegins),
-    whatIf: buildWhatIf(population, semesterBegins),
     meta: loaded.meta,
     contactsReadAt: loaded.contactsReadAt,
   };
+}
+
+/**
+ * Split the population by its tblOUSA row and build each term's own boundary view. Grouping is by
+ * semesterName because that is what the user sees; isCurrentTerm only orders the groups.
+ */
+export function buildFreshmanTerms(population: FreshmanAnalysisRow[]): FreshmanTermGroup[] {
+  const byTerm = new Map<string, FreshmanAnalysisRow[]>();
+  for (const r of population) {
+    const key = r.semesterName || (r.isCurrentTerm ? "Current semester" : "Previous semester");
+    const bucket = byTerm.get(key);
+    if (bucket) bucket.push(r);
+    else byTerm.set(key, [r]);
+  }
+  return [...byTerm.entries()]
+    .map(([semesterName, termRows]) => {
+      const begins = termRows.find((r) => r.semesterBegins)?.semesterBegins ?? null;
+      return {
+        semesterName,
+        isCurrentTerm: termRows[0].isCurrentTerm,
+        semesterBegins: begins,
+        students: termRows.length,
+        mismatches: termRows.filter((r) => r.mismatch).length,
+        buckets: buildCreationBuckets(termRows, begins),
+        // Scoped to this term's rows: pricing a candidate start date against the other term's
+        // students would answer a question nobody asked.
+        whatIf: buildWhatIf(termRows, begins),
+      };
+    })
+    .sort((a, b) => Number(b.isCurrentTerm) - Number(a.isCurrentTerm) || a.semesterName.localeCompare(b.semesterName));
 }
 
 /* ────────────────────── R3 — Students Cleared More Than Once ────────────────────── */

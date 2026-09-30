@@ -38,6 +38,8 @@ import type {
   ReclaimResult,
   ReclaimOutcome,
   SemesterUpdateResult,
+  ClearanceCheckResult,
+  ClearanceCheckOutcome,
   SemesterUpdateOutcome,
 } from "../types";
 import { DataSourceUnavailableError, resolveTerms } from "../types";
@@ -397,6 +399,8 @@ export class MssqlDataProvider implements DataProvider {
       mostRecentYearEnrolled: text(x.mostRecentYearEnrolled),
       currentClassCode: x.currentClassCode ?? "",
       dateCreated: x.dateCreated ? new Date(x.dateCreated) : null,
+      semesterName: text(x.semesterName) ?? "",
+      isCurrentTerm: Boolean(x.isCurrentTerm),
       semesterBegins: x.semesterBegins ? new Date(x.semesterBegins) : null,
       derivedClass: x.derivedClass,
       mismatch: Boolean(x.mismatch),
@@ -527,6 +531,13 @@ export class MssqlDataProvider implements DataProvider {
       if (/Could not find stored procedure|permission was denied|EXECUTE permission/i.test(msg)) {
         throw new DataSourceUnavailableError("The reclaim procedure is not installed or not granted.", err);
       }
+      // Same version-drift case as the semester procedure above.
+      if (/too many arguments|expects parameter|was not supplied/i.test(msg)) {
+        throw new DataSourceUnavailableError(
+          "A different version of dbo.usp_ReclaimStudentFromJenzabar is installed: it does not accept the parameters this application sends. Run db/production/10_usp_reclaim_student.sql to replace it.",
+          err,
+        );
+      }
       throw err;
     }
   }
@@ -550,6 +561,53 @@ export class MssqlDataProvider implements DataProvider {
       const msg = err instanceof Error ? err.message : String(err);
       if (/Could not find stored procedure|permission was denied|EXECUTE permission/i.test(msg)) {
         throw new DataSourceUnavailableError("The semester update procedure is not installed or not granted.", err);
+      }
+      /**
+       * A DIFFERENT procedure of the same name is installed — the original draft took only
+       * @Idnumber, while this one also passes @actor and reads an outcome row back. A version
+       * mismatch between the application and the database is a deployment state, not a fault, so
+       * it degrades like "not installed" rather than returning a 500 that says nothing useful.
+       */
+      if (/too many arguments|expects parameter|was not supplied/i.test(msg)) {
+        throw new DataSourceUnavailableError(
+          "A different version of dbo.usp_UpdateStudentSemester is installed: it does not accept the parameters this application sends. Run db/production/11_usp_update_student_semester.sql to replace it.",
+          err,
+        );
+      }
+      throw err;
+    }
+  }
+
+  async checkStudentClearance(id: StudentKey, actor: string): Promise<ClearanceCheckResult> {
+    try {
+      const r = await (await this.pool())
+        .request()
+        .input("id", sql.VarChar(50), id)
+        .input("actor", sql.VarChar(200), actor)
+        .query<RawClearanceCheck>(QS.checkClearance);
+      const x = r.recordset[0];
+      if (!x) throw new DataSourceUnavailableError("The clearance check procedure returned no outcome.");
+      return {
+        outcome: x.outcome as ClearanceCheckOutcome,
+        lastCleared: text(x.lastCleared),
+        // ClearedOn is varchar YYYYMMDD in the column, but a driver may still hand it back as a
+        // number; text() keeps the shape one type either way.
+        clearedOn: text(x.clearedOn),
+        clearedBy: text(x.clearedBy),
+        rowsUpdated: Number(x.rowsUpdated ?? 0),
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/Could not find stored procedure|permission was denied|EXECUTE permission/i.test(msg)) {
+        throw new DataSourceUnavailableError("The clearance check procedure is not installed or not granted.", err);
+      }
+      // Same version-drift translation as the other two procedure callers: a mismatch between the
+      // application and the database is a deployment state, not a fault.
+      if (/too many arguments|expects parameter|was not supplied/i.test(msg)) {
+        throw new DataSourceUnavailableError(
+          "A different version of dbo.usp_CheckStudentClearance is installed: it does not accept the parameters this application sends. Run db/production/12_usp_check_clearance.sql to replace it.",
+          err,
+        );
       }
       throw err;
     }
@@ -699,13 +757,14 @@ function mapStudent(r: RawStudent): StudentRow {
 }
 
 interface RawUnclassified { idnumber: string | number; classCode: string; resolvableAs: string; status: string; source: "enrolled" | "cleared" }
-interface RawFreshman { idnumber: string | number; classCode: string; webCode: number | null; mostRecentYearEnrolled: string | number | null; currentClassCode: string; dateCreated: string | Date | null; semesterBegins: string | Date | null; derivedClass: "FF" | "FR"; mismatch: boolean | number }
+interface RawFreshman { idnumber: string | number; classCode: string; webCode: number | null; mostRecentYearEnrolled: string | number | null; currentClassCode: string; dateCreated: string | Date | null; semesterName: string | null; isCurrentTerm: boolean | number; semesterBegins: string | Date | null; derivedClass: "FF" | "FR"; mismatch: boolean | number }
 interface RawClearedAction { idnumber: string | number; classCode: string; dateCleared: string | Date | null; clearedBy: string | null; actionNo: number; actionCount: number }
 interface RawEnrolleeBalance { idnumber: string | number; classCode: string; rawClassCode: string }
 interface RawCurrentlyCleared { idnumber: string | number; classCode: string; rawClassCode: string; dateCleared: string | Date | null }
 interface RawDiagnostic { inTblStudent: number; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; addressRows: number; qualifyingAddressRows: number; addressCodes: string | null; lastName: string | null; firstName: string | null; middleName: string | null; email: string | null; city: string | null; stateCode: string | null }
 interface RawReclaim { outcome: string; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; hasQualifyingAddress: number; addressRows: number; rowsInserted: number }
 interface RawSemesterUpdate { outcome: string; lastCleared: string | number | null; exPeriod: string | number | null; rowsUpdated: number }
+interface RawClearanceCheck { outcome: string; lastCleared: string | null; clearedOn: string | number | null; clearedBy: string | null; rowsUpdated: number }
 interface RawContact { idnumber: string | number; lastname: string | null; firstname: string | null; email: string | number | null; AccountBalance: number | string | null }
 
 /**

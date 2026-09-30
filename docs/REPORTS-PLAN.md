@@ -15,11 +15,12 @@ those become **Phase 7c** and are re-sequenced at the end of this document.
 | # | Decision | Effect |
 |---|---|---|
 | R-D1 | **Snapshot nightly + Refresh button.** Reports read a snapshot; a worker job refreshes it on a schedule, and a Refresh button on each page re-runs it. | Pages open in under a second even though four of the six source scripts take 40–120 s. Every page shows snapshot age. |
-| R-D2 | **Current + previous term where the data supports it.** Reports keyed on `tblStudent.LastCleared` get a current/previous selector; reports that must read `VIEW_OURM_*` are current-term only and say so on screen. | Three reports get a term selector, three do not. The inconsistency is visible and explained, not hidden. |
+| R-D2 | **Current + previous term where the data supports it.** Reports keyed on `tblStudent.LastCleared` get a current/previous selector; reports that must read `VIEW_OURM_*` are current-term only and say so on screen. | Two reports (R2, R5) cover both terms, four do not. The inconsistency is visible and explained, not hidden. |
 | R-D3 | **Export gate = `export.create` OR `mailmerge.create`; CSV and XLSX both.** | Operators and Admins export; Viewers need an explicit grant. A new XLSX writer is in scope (see §5.2). |
 | R-D4 | **The three "Data Analysis" lines become three report-catalog pages**, with metrics proposed here for your sign-off. | Phase 7b. Scope is a proposal, not yet agreed — see §6. |
 | R-D5 *(2026-09-29)* | **Classification: data-quality reports select on the raw class code and display both readings; operational and analytical views display the A-19 bucket.** | Closes R-Q2. R1 keeps its raw selection rule and gains a "Dashboard reports as" column; R6 displays the A-19 bucket with the raw code beside it. See §1.2. |
 | R-D6 *(2026-09-29)* | **R5 reads the shipped DNR/DNC population, and the rows your script would include but the A-1 guard excludes are shown as a labelled group rather than dropped.** | Closes R-Q4. One population feeds the dashboard card and the letters; today the two return identical rows. See §1.3. |
+| R-D2a *(2026-09-29)* | **R2 covers the current AND previous semester**, widening its `tblOUSA` join to `isCurrent = 1 OR wasCurrent = 1`. | Amends R-D2, which had placed R2 in the current-only group. R2 never reads `VIEW_OURM_*`, so the widening is sound. Each term keeps its own `SemesterBegins`, so the boundary chart and the what-if are rendered **per term** — no single date is the boundary for both populations, and R-D7's remedy now names which term's row to change. See §3. |
 | R-D7 *(2026-09-29)* | **R2's anomaly is `cCode` ≠ derived `cClass`, and it is a warning rather than a defect** — one remedy is changing `SemesterBegins` in `tblOUSA`. | Closes R-Q3. The page leads with the `DateCreated` distribution around the boundary and a what-if on candidate dates, recommends rather than applies, and warns that the parameter is shared. See §1.4. |
 
 ---
@@ -63,7 +64,14 @@ This also settles what the A-19 column is *for* — see §1.2 and the two-part l
 
 **It is a warning, not a defect** — one remedy is to change `SemesterBegins` in `tblOUSA`, so a mismatch may
 mean the boundary date is wrong rather than the student record. That distinction drives the page design;
-see §1.4. The `TEL_WEB_GRP_CDE` legend in the script's comment block is seeded into
+see §1.4.
+
+**Current and previous semester** (J. Wilson, 2026-09-29): the `tblOUSA` join is
+`isCurrent = 1 OR wasCurrent = 1`, not `isCurrent = 1` (**R-D2a**). `SemesterBegins` is a per-term column, so
+the two terms have two different boundaries and a student's `cClass` is derived against the boundary of the
+term they matched through `LastCleared`. The page therefore renders **one boundary chart and one what-if per
+term**, each labelled with its semester, and the what-if names which term's `SemesterBegins` it is pricing —
+moving the current term's start date does not change the previous term's mismatch count. The `TEL_WEB_GRP_CDE` legend in the script's comment block is seeded into
 `Setting.webGroupCodeLabels` and rendered as a label, not a bare number.
 
 **R3 — Cleared More Than Once.** `view_ourm_stats.[rows] > 1` is the same dedup key the hero card uses;
@@ -232,12 +240,12 @@ banner past the threshold.
 
 ---
 
-## 3. Term scope (R-D2)
+## 3. Term scope (R-D2, amended by R-D2a)
 
 | Report | Current | Previous | Why |
 |---|---|---|---|
 | R1 Unclassified | ✅ | ❌ | `VIEW_OURM_FCA` / `_STATS` are scoped to `tblOUSA.isCurrent = 1` |
-| R2 Freshman Analysis | ✅ | ❌ | Joins `tblOUSA WHERE isCurrent = 1` |
+| R2 Freshman Analysis | ✅ | ✅ | Joins `tblOUSA` on `isCurrent = 1 OR wasCurrent = 1`; reads no `VIEW_OURM_*` (R-D2a) |
 | R3 Cleared More Than Once | ✅ | ❌ | `VIEW_OURM_CLEARED` is current-term only |
 | R4 Enrollee Balance | ✅ | ❌ | `VIEW_OURM_FCA` |
 | R5 DNC/DNR | ✅ | ✅ | Reads `tblStudent.LastCleared` against both `isCurrent` and `wasCurrent` rows |

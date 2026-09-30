@@ -72,7 +72,10 @@ export const REPORT_DEFINITIONS: readonly ReportDefinition[] = [
     title: "Freshman Classification Analysis",
     blurb: "FF/FR codes against the Global Student Code in Student Master",
     sourceScript: "FreshmanWebCodeAnalysis.sql",
-    termScope: "current",
+    // Current AND previous: R2 reads tblStudent/student_master against tblOUSA directly, never the
+    // current-term-only VIEW_OURM_* views, so widening the tblOUSA join to isCurrent = 1 OR
+    // wasCurrent = 1 genuinely covers both terms (R-D2a). Each term keeps its own SemesterBegins.
+    termScope: "current+previous",
     family: "reportFreshmanAnalysis",
     jobKey: "report.freshmanAnalysis",
     // Cheap, and classification churns through registration.

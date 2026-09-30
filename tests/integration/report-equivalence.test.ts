@@ -89,16 +89,34 @@ suite("report SQL equivalence against staging (docs/validation-sql/reports)", ()
     expect(diff(original, rewrite)).toEqual({ onlyInOriginal: [], onlyInRewrite: [] });
   }, 300_000);
 
-  it("R2 freshman analysis: same students, and the same mismatch verdict per student", async () => {
+  // R2 is DELIBERATELY not row-for-row equivalent: the supplied script joins tblOUSA on
+  // isCurrent = 1, the rewrite on isCurrent = 1 OR wasCurrent = 1, because the report is specified
+  // for the current AND previous semester (R-D2a). Equivalence is therefore asserted on the
+  // current-term slice, and the extra rows are asserted to be previous-term rows and nothing else.
+  it("R2 freshman analysis: the current-term slice matches the script student for student", async () => {
     const pool = await getSourcePool();
     const [a, b] = await Promise.all([pool.request().query(script("FreshmanWebCodeAnalysis.sql")), pool.request().query(RQ.freshmanAnalysis)]);
     const original = new Map(
       a.recordset.map((row: Record<string, unknown>) => [String(row.idnumber).trim(), String(row.cCode).trim().toUpperCase() !== String(row.cClass).trim().toUpperCase()]),
     );
-    const rewrite = new Map(b.recordset.map((row: Record<string, unknown>) => [String(row.idnumber).trim(), Boolean(row.mismatch)]));
-    expect([...rewrite.keys()].sort()).toEqual([...original.keys()].sort());
+    const rewriteRows = b.recordset as Record<string, unknown>[];
+    const currentSlice = new Map(
+      rewriteRows.filter((row) => Boolean(row.isCurrentTerm)).map((row) => [String(row.idnumber).trim(), Boolean(row.mismatch)]),
+    );
+    expect([...currentSlice.keys()].sort()).toEqual([...original.keys()].sort());
     // The verdict is the report's entire output, so it must match student by student, not in total.
-    const disagreements = [...original.entries()].filter(([id, v]) => rewrite.get(id) !== v).map(([id]) => id);
+    const disagreements = [...original.entries()].filter(([id, v]) => currentSlice.get(id) !== v).map(([id]) => id);
     expect(disagreements.slice(0, 20)).toEqual([]);
+
+    // Everything the rewrite adds is a previous-term row — the widening must not leak any other
+    // population in, and each added row must carry its own term's SemesterBegins.
+    const added = rewriteRows.filter((row) => !currentSlice.has(String(row.idnumber).trim()) || !row.isCurrentTerm);
+    expect(added.every((row) => !row.isCurrentTerm)).toBe(true);
+    const terms = new Set(rewriteRows.map((row) => String(row.semesterName)));
+    expect(terms.size).toBeLessThanOrEqual(2);
+    for (const term of terms) {
+      const begins = new Set(rewriteRows.filter((row) => String(row.semesterName) === term).map((row) => String(row.semesterBegins)));
+      expect(begins.size).toBe(1);
+    }
   }, 300_000);
 });

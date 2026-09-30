@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatCount, formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PrintButton } from "@/components/print/PrintButton";
@@ -72,6 +73,12 @@ export function ReportShell({
             {live ? null : <RefreshReportButton reportKey={definition.key} />}
             {canExport ? <ExportReportButtons reportKey={definition.key} query={query} rowCount={rowCount} /> : null}
             <PrintButton />
+            {/* Same shape and position as the other detail pages (dashboard/students,
+                clearance-sprint/students): a link to the parent, not history.back(), so it lands
+                on the catalog whether the user arrived from there, a bookmark or an export mail. */}
+            <Link href="/reports" className="text-sm text-brand no-print">
+              ← Back to reports
+            </Link>
           </span>
         }
       />

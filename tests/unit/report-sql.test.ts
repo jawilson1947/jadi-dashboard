@@ -120,12 +120,16 @@ describe("report catalog", () => {
     }
   });
 
-  it("marks only R5 as live, and only R5 as covering the previous semester", () => {
+  it("marks only R5 as live, and R2/R5 as covering the previous semester", () => {
     const live = REPORT_DEFINITIONS.filter((r) => r.family === null);
     expect(live.map((r) => r.ref)).toEqual(["R5"]);
-    // Every other report reads a view scoped to tblOUSA.isCurrent = 1, so claiming otherwise on
-    // screen would be a promise the data cannot keep (R-D2).
+    // R2 and R5 read tblStudent.LastCleared against tblOUSA directly, so they can span both terms.
+    // R1, R3, R4 and R6 read VIEW_OURM_* views scoped to isCurrent = 1, so claiming otherwise on
+    // screen would be a promise the data cannot keep (R-D2 / R-D2a).
     const both = REPORT_DEFINITIONS.filter((r) => r.termScope === "current+previous");
-    expect(both.map((r) => r.ref)).toEqual(["R5"]);
+    expect(both.map((r) => r.ref)).toEqual(["R2", "R5"]);
+    // The claim on R2 is only honest while its tblOUSA join actually admits the wasCurrent row.
+    expect(RQ.freshmanAnalysis).toMatch(/o\.isCurrent\s*=\s*1\s+OR\s+o\.wasCurrent\s*=\s*1/i);
+    expect(RQ.freshmanAnalysis).not.toMatch(/VIEW_OURM/i);
   });
 });

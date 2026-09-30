@@ -20,6 +20,8 @@ export function BioCard({
   hideHref,
   canUpdateSemester = false,
   semesterOutcome = null,
+  canCheckClearance = false,
+  clearanceOutcome = null,
 }: {
   profile: StudentProfile;
   canReveal: boolean;
@@ -29,6 +31,10 @@ export function BioCard({
   canUpdateSemester?: boolean;
   /** Result of the update the user just ran, carried back through the redirect. */
   semesterOutcome?: { status: string; message: string } | null;
+  /** The record says not cleared AND the caller may reconcile it against the source (A-34). */
+  canCheckClearance?: boolean;
+  /** Result of the clearance check the user just ran, carried back through the redirect. */
+  clearanceOutcome?: { status: string; message: string } | null;
 }) {
   const a = profile.address;
   // Step 4: when Jenzabar holds no current-term registration, the label itself carries the answer.
@@ -91,15 +97,42 @@ export function BioCard({
             </form>
           ) : null}
         </div>
-        <Field
-          label={profile.currentTermRecord ? `Cleared for ${profile.lastClearedLabel} (current)` : profile.lastCleared ? `Cleared for ${profile.lastClearedLabel}` : "Clearance flag"}
-          value={profile.clearedCurrentSession ? "Yes" : "No"}
-          hint={
-            profile.clearedCurrentSession && !profile.currentTermRecord
-              ? "This clearance belongs to the semester named above, which is not the current one."
-              : undefined
-          }
-        />
+        <div>
+          <dt className="text-ink-3 text-xs">
+            {profile.currentTermRecord
+              ? `Cleared for ${profile.lastClearedLabel} (current)`
+              : profile.lastCleared
+                ? `Cleared for ${profile.lastClearedLabel}`
+                : "Clearance flag"}
+          </dt>
+          <dd>{profile.clearedCurrentSession ? "Yes" : "No"}</dd>
+          {profile.clearedCurrentSession && !profile.currentTermRecord ? (
+            <p className="text-xs text-ink-3 mt-0.5">
+              This clearance belongs to the semester named above, which is not the current one.
+            </p>
+          ) : null}
+          {clearanceOutcome ? (
+            <p
+              role="status"
+              className={`text-xs mt-1 ${clearanceOutcome.status === "cleared" ? "text-ink-2" : "text-warning"}`}
+            >
+              {clearanceOutcome.message}
+            </p>
+          ) : null}
+          {canCheckClearance ? (
+            // POST, not a link: it writes to source data, and must not be reachable by prefetch.
+            <form method="post" action="/api/v1/students/clearance-check" className="mt-2 no-print">
+              <input type="hidden" name="id" value={profile.idnumber} />
+              <button
+                type="submit"
+                className="rounded-md border border-brand text-brand px-3 py-1 text-xs hover:bg-brand-track"
+                title="Look for a clearance action for this student in the current semester, and mark the record cleared if one exists"
+              >
+                Check Clearance
+              </button>
+            </form>
+          ) : null}
+        </div>
         <Field
           label="Cleared on"
           value={profile.clearedOn ? formatIsoDateSafe(profile.clearedOn) : (profile.clearedOnRaw ?? (profile.clearedCurrentSession ? "Not recorded" : "—"))}

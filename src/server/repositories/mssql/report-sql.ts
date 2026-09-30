@@ -121,8 +121,16 @@ DROP TABLE #first;`,
    * student_master.DateCreated against tblOUSA.SemesterBegins; `mismatch` is cCode <> cClass, which
    * is the anomaly (R-D7). It is a warning, not a defect: one remedy is changing SemesterBegins.
    *
-   * semesterBegins is returned on every row so the page can redraw the boundary and recompute the
-   * what-if ("if SemesterBegins were X, mismatches would be N") without another query.
+   * CURRENT AND PREVIOUS SEMESTER (R-D2a): the supplied script joins tblOUSA on isCurrent = 1 only.
+   * This widens that to isCurrent = 1 OR wasCurrent = 1, so the report covers both terms — a
+   * deliberate divergence from the script, recorded in docs/validation-sql/reports/README.md.
+   * Nothing here reads the current-term-only VIEW_OURM_* views, so the widening is sound: each
+   * student matches exactly one tblOUSA row through LastCleared, and the derived class is computed
+   * against THAT row's SemesterBegins, not a single global boundary.
+   *
+   * semesterName / isCurrentTerm identify the row's own term, and semesterBegins is that term's own
+   * boundary, so the page can draw one boundary panel per semester and recompute each term's
+   * what-if ("if this term's SemesterBegins were X, its mismatches would be N") without a query.
    */
   freshmanAnalysis: `
 SET NOCOUNT ON;
@@ -134,6 +142,8 @@ SELECT CAST(s.idnumber AS varchar(50))                       AS idnumber,
        LTRIM(RTRIM(CAST(sm.MOST_RECNT_YR_ENR AS varchar(10))))  AS mostRecentYearEnrolled,
        UPPER(LTRIM(RTRIM(ISNULL(sm.CURRENT_CLASS_CDE, ''))))  AS currentClassCode,
        CAST(sm.DateCreated AS datetime)                      AS dateCreated,
+       LTRIM(RTRIM(ISNULL(o.SemesterName, '')))              AS semesterName,
+       CAST(CASE WHEN o.isCurrent = 1 THEN 1 ELSE 0 END AS bit) AS isCurrentTerm,
        CAST(o.SemesterBegins AS datetime)                    AS semesterBegins,
        CASE WHEN sm.DateCreated > o.SemesterBegins THEN 'FF' ELSE 'FR' END AS derivedClass,
        CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(s.cCode, ''))))
@@ -141,12 +151,13 @@ SELECT CAST(s.idnumber AS varchar(50))                       AS idnumber,
             THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END      AS mismatch
 FROM dbo.tblStudent s
 JOIN [jadi].[dbo].[student_master] sm ON CAST(sm.ID_NUM AS varchar(50)) = CAST(s.idnumber AS varchar(50))
-JOIN dbo.tblOUSA o ON o.isCurrent = 1 AND s.LastCleared IN (o.JADI_TradName, o.JADI_LeapName)
+JOIN dbo.tblOUSA o ON (o.isCurrent = 1 OR o.wasCurrent = 1) AND s.LastCleared IN (o.JADI_TradName, o.JADI_LeapName)
 WHERE UPPER(LTRIM(RTRIM(ISNULL(s.cCode, '')))) IN ('FR', 'FF')
--- Chronological, because the pattern in time is the finding (REPORTS-PLAN §4.2). The supplied
--- script tie-breaks on name; this uses the id instead, so the captured population carries no name
+-- Current term first, then chronological, because the pattern in time is the finding within each
+-- term (REPORTS-PLAN §4.2) and the two terms have different boundaries. The supplied script
+-- tie-breaks on name; this uses the id instead, so the captured population carries no name
 -- column at all and the A-30 guarantee is visible in the SELECT list rather than argued for.
-ORDER BY sm.DateCreated, CAST(s.idnumber AS varchar(50));`,
+ORDER BY CASE WHEN o.isCurrent = 1 THEN 0 ELSE 1 END, sm.DateCreated, CAST(s.idnumber AS varchar(50));`,
 
   /**
    * R3 — Students cleared more than once (db/sql/StudentsClearedMoreThanOnce.sql).

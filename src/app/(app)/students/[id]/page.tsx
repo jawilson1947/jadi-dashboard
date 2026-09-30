@@ -23,6 +23,7 @@ import { Unavailable } from "@/components/students/Unavailable";
 import { getAppStore } from "@/server/store";
 import { describeGaps } from "@/server/services/reclaim";
 import { canUpdateSemester, SEMESTER_UPDATE_MESSAGES } from "@/server/services/semester-update";
+import { canCheckClearance, CLEARANCE_CHECK_MESSAGES } from "@/server/services/clearance-check";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Student Profile" };
@@ -38,6 +39,7 @@ const paramsSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   // Outcome of an Update Semester run, carried back through the 303 (A-33).
   semester: z.enum(["updated", "no_registration", "no_student", "invalid_id", "unavailable"]).optional(),
+  clearance: z.enum(["cleared", "no_clearance_record", "no_student", "invalid_id", "unavailable"]).optional(),
 });
 
 /**
@@ -135,6 +137,8 @@ export default async function StudentProfilePage({
           hideHref={`${base}?tab=bio`}
           canUpdateSemester={hasPermission(principal, "student.update") && canUpdateSemester(profile.lastCleared, profile.lastClearedLabel)}
           semesterOutcome={q.semester ? { status: q.semester, message: SEMESTER_UPDATE_MESSAGES[q.semester] } : null}
+          canCheckClearance={hasPermission(principal, "student.update") && canCheckClearance(profile.clearedCurrentSession)}
+          clearanceOutcome={q.clearance ? { status: q.clearance, message: CLEARANCE_CHECK_MESSAGES[q.clearance] } : null}
         />
       ) : null}
 

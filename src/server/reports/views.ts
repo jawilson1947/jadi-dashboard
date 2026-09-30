@@ -86,6 +86,7 @@ export async function resolveReport(
       const all = view.rows;
       rows = (params.group === "all" ? all : all.filter((r) => r.group === params.group)) as unknown as Record<string, unknown>[];
       columns = [
+        col("Semester", "semesterName", 18),
         col("Class code", "classCode", 12),
         col("Student ID", "idnumber", 14),
         col("Last name", "lastName", 20),

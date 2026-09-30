@@ -33,6 +33,7 @@ export type AuditAction =
   // found and missing, so the audit row explains the state of the record it created.
   | "student.reclaim"
   | "student.semester_update"
+  | "student.clearance_check"
   | "ai.request"
   | "admin.change"
   | "job.manual_run"

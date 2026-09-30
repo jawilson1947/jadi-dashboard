@@ -153,6 +153,18 @@ SELECT
    */
   updateSemester: `EXEC dbo.usp_UpdateStudentSemester @Idnumber = @id, @actor = @actor;`,
 
+  /**
+   * Confirm a student's clearance from the source view and write it back (A-34). EXEC only, for
+   * the same reason as the two above.
+   *
+   * The procedure reads dbo.VIEW_OURM_CLEARED, NOT VIEW_OURM_STATS: the supplied instruction named
+   * STATS, but that view costs 40-120 s and the application is barred from it. CLEARED holds the
+   * same clearance actions and answers in 0.0 s (FINDINGS section 8.6c). Because the read happens
+   * inside the procedure rather than here, the guardrail tests below still see no slow view in any
+   * statement this application sends.
+   */
+  checkClearance: `EXEC dbo.usp_CheckStudentClearance @Idnumber = @id, @actor = @actor;`,
+
 
   /**
    * Bio Spec 1.5.1 — the institution's own worksheet procedure. Read-only, and the drop date comes

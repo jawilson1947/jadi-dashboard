@@ -127,18 +127,36 @@ describe("R2 — Freshman Classification Analysis", () => {
     expect(view.mismatches).toBe(manual);
   });
 
-  it("prices candidate boundaries without re-querying, and moving the boundary changes the count", async () => {
+  it("covers the current AND previous semester, each with its own boundary (R-D2a)", async () => {
     await captureAll(store);
     const view = await getFreshmanView({ provider, store, now: T0 });
-    expect(view.whatIf.length).toBeGreaterThan(0);
-    const current = view.whatIf.find((w) => w.date === view.semesterBegins!.toISOString().slice(0, 10));
-    expect(current!.mismatches).toBe(view.mismatches);
+    expect(view.terms.length).toBe(2);
+    expect(view.terms[0].isCurrentTerm).toBe(true);
+    expect(view.terms[1].isCurrentTerm).toBe(false);
+    // Two terms, two different SemesterBegins — that is the whole reason the panels are per-term.
+    const begins = view.terms.map((t) => t.semesterBegins?.getTime());
+    expect(begins[0]).not.toBe(begins[1]);
+    // The groups partition the population; nothing is dropped or double-counted.
+    expect(view.terms.reduce((t, g) => t + g.students, 0)).toBe(view.rows.length);
+    expect(view.terms.reduce((t, g) => t + g.mismatches, 0)).toBe(view.mismatches);
+  });
+
+  it("prices each term's candidate boundaries against that term's students only", async () => {
+    await captureAll(store);
+    const view = await getFreshmanView({ provider, store, now: T0 });
+    for (const term of view.terms) {
+      expect(term.whatIf.length).toBeGreaterThan(0);
+      const current = term.whatIf.find((w) => w.date === term.semesterBegins!.toISOString().slice(0, 10));
+      // At the term's real start date the what-if must reproduce that term's count, not the total.
+      expect(current!.mismatches).toBe(term.mismatches);
+    }
   });
 
   it("a boundary before every record makes every FF correct and every FR wrong", () => {
+    const base = { webCode: null, mostRecentYearEnrolled: null, semesterName: "Fall 2026", isCurrentTerm: true, semesterBegins: null };
     const rows = [
-      { idnumber: "1", classCode: "FF", dateCreated: new Date("2026-08-20"), derivedClass: "FF" as const, mismatch: false, webCode: null, mostRecentYearEnrolled: null, currentClassCode: "FF", semesterBegins: null },
-      { idnumber: "2", classCode: "FR", dateCreated: new Date("2026-08-21"), derivedClass: "FR" as const, mismatch: false, webCode: null, mostRecentYearEnrolled: null, currentClassCode: "FR", semesterBegins: null },
+      { ...base, idnumber: "1", classCode: "FF", dateCreated: new Date("2026-08-20"), derivedClass: "FF" as const, mismatch: false, currentClassCode: "FF" },
+      { ...base, idnumber: "2", classCode: "FR", dateCreated: new Date("2026-08-21"), derivedClass: "FR" as const, mismatch: false, currentClassCode: "FR" },
     ];
     // Everything created after the boundary derives FF, so the FR record is the only mismatch.
     expect(mismatchesAt(rows, new Date("2026-01-01"))).toBe(1);
@@ -146,12 +164,14 @@ describe("R2 — Freshman Classification Analysis", () => {
     expect(mismatchesAt(rows, new Date("2026-12-31"))).toBe(1);
   });
 
-  it("buckets record creation by week and marks the week holding the boundary", async () => {
+  it("buckets record creation by week and marks the week holding each term's boundary", async () => {
     await captureAll(store);
     const view = await getFreshmanView({ provider, store, now: T0 });
-    expect(view.buckets.length).toBeGreaterThan(0);
-    expect(view.buckets.filter((b) => b.containsBoundary).length).toBeLessThanOrEqual(1);
-    expect(view.buckets.reduce((t, b) => t + b.mismatches, 0)).toBe(view.mismatches);
+    for (const term of view.terms) {
+      expect(term.buckets.length).toBeGreaterThan(0);
+      expect(term.buckets.filter((b) => b.containsBoundary).length).toBeLessThanOrEqual(1);
+      expect(term.buckets.reduce((t, b) => t + b.mismatches, 0)).toBe(term.mismatches);
+    }
   });
 });
 

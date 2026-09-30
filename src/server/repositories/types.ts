@@ -346,6 +346,11 @@ export interface FreshmanAnalysisRow {
   mostRecentYearEnrolled: string | null;
   currentClassCode: string;
   dateCreated: Date | null;
+  /** tblOUSA.SemesterName of the row this student matched through LastCleared. */
+  semesterName: string;
+  /** True for the isCurrent row, false for the wasCurrent one. The report covers both (R-D2a). */
+  isCurrentTerm: boolean;
+  /** THIS student's term boundary, not a single global one — the two terms differ. */
   semesterBegins: Date | null;
   derivedClass: "FF" | "FR";
   /** classCode <> derivedClass. A warning, not a defect — see A-30's sibling R-D7 in REPORTS-PLAN §1.4. */
@@ -439,6 +444,25 @@ export interface SemesterUpdateResult {
   rowsUpdated: number;
 }
 
+/**
+ * Outcome of confirming a student's clearance against the source view (A-34).
+ *
+ * `no_clearance_record` is an ANSWER, not a failure: the student is not cleared, and nothing was
+ * written. The procedure never un-clears a student on the strength of an empty view.
+ */
+export type ClearanceCheckOutcome = "cleared" | "no_clearance_record" | "no_student" | "invalid_id";
+
+export interface ClearanceCheckResult {
+  outcome: ClearanceCheckOutcome;
+  /** The semester written, from tblOUSA.JADI_TradName / JADI_LeapName so it always resolves. */
+  lastCleared: string | null;
+  /** tblStudent.ClearedOn as written — YYYYMMDD, taken from the clearance action's own date. */
+  clearedOn: string | null;
+  /** VIEW_OURM_CLEARED.USER_NAME — who cleared them in the source system ('sa' = automatic). */
+  clearedBy: string | null;
+  rowsUpdated: number;
+}
+
 export interface ReclaimResult {
   outcome: ReclaimOutcome;
   hasStudentMaster: boolean;
@@ -509,6 +533,13 @@ export interface DataProvider {
   getEnrolleeBalancePopulation(): Promise<EnrolleeBalanceRow[]>;
   /** R6. One clearance action per student, chosen deterministically by date. */
   getCurrentlyClearedPopulation(): Promise<CurrentlyClearedRow[]>;
+
+  /**
+   * A-34. Confirms clearance from dbo.VIEW_OURM_CLEARED and writes it back to tblStudent through a
+   * dbo-owned procedure. Writes nothing when the student has no clearance action. Throws
+   * DataSourceUnavailableError when the procedure is not installed.
+   */
+  checkStudentClearance(id: StudentKey, actor: string): Promise<ClearanceCheckResult>;
 
   /* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
   /** Why this id is missing from tblStudent. Read-only, sub-second, safe on any lookup miss. */

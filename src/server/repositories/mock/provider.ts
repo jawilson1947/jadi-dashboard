@@ -39,6 +39,7 @@ import type {
   ReclaimDiagnostic,
   ReclaimResult,
   SemesterUpdateResult,
+  ClearanceCheckResult,
 } from "../types";
 import { resolveTerms } from "../types";
 import { generateSyntheticDataset, generateTransactions, type SyntheticDataset } from "./synthetic";
@@ -399,28 +400,40 @@ export class MockDataProvider implements DataProvider {
 
   async getFreshmanAnalysis(): Promise<FreshmanAnalysisRow[]> {
     const terms = resolveTerms(this.data.terms);
-    const begins = terms.current.semesterBegins ? new Date(terms.current.semesterBegins) : null;
-    return this.data.students
-      .filter((s) => ["FR", "FF"].includes(s.classificationCode.toUpperCase()))
-      .filter((s) => s.lastCleared !== null && terms.currentKeys.includes(s.lastCleared))
-      .map((s) => {
-        // Synthetic stand-in for student_master.DateCreated: deterministic per student, spread
-        // either side of the boundary so the mismatch pattern the page draws is visible in mock mode.
-        const created = syntheticCreated(s.idnumber, begins);
-        const derivedClass: "FF" | "FR" = begins && created && created > begins ? "FF" : "FR";
-        return {
-          idnumber: s.idnumber,
-          classCode: s.classificationCode.toUpperCase(),
-          webCode: s.isIncomingTransfer ? 22 : 1,
-          mostRecentYearEnrolled: terms.current.yearCode || null,
-          currentClassCode: s.classificationCode.toUpperCase(),
-          dateCreated: created,
-          semesterBegins: begins,
-          derivedClass,
-          mismatch: s.classificationCode.toUpperCase() !== derivedClass,
-        };
-      })
-      .sort((a, b) => (a.dateCreated?.getTime() ?? 0) - (b.dateCreated?.getTime() ?? 0) || a.idnumber.localeCompare(b.idnumber));
+    // Both terms (R-D2a), each against its OWN SemesterBegins — the point of the widening is that
+    // the two boundaries differ, so mock mode has to reproduce two of them or the page's per-term
+    // panels are never exercised outside production.
+    const scopes = [
+      { term: terms.current, keys: terms.currentKeys, isCurrentTerm: true },
+      { term: terms.previous, keys: terms.previousKeys, isCurrentTerm: false },
+    ];
+    const freshmen = this.data.students.filter((s) => ["FR", "FF"].includes(s.classificationCode.toUpperCase()));
+    return scopes
+      .flatMap(({ term, keys, isCurrentTerm }) => {
+        const begins = term.semesterBegins ? new Date(term.semesterBegins) : null;
+        return freshmen
+          .filter((s) => s.lastCleared !== null && keys.includes(s.lastCleared))
+          .map((s) => {
+            // Synthetic stand-in for student_master.DateCreated: deterministic per student, spread
+            // either side of the boundary so the mismatch pattern the page draws is visible in mock mode.
+            const created = syntheticCreated(s.idnumber, begins);
+            const derivedClass: "FF" | "FR" = begins && created && created > begins ? "FF" : "FR";
+            return {
+              idnumber: s.idnumber,
+              classCode: s.classificationCode.toUpperCase(),
+              webCode: s.isIncomingTransfer ? 22 : 1,
+              mostRecentYearEnrolled: term.yearCode || null,
+              currentClassCode: s.classificationCode.toUpperCase(),
+              dateCreated: created,
+              semesterName: term.semesterName,
+              isCurrentTerm,
+              semesterBegins: begins,
+              derivedClass,
+              mismatch: s.classificationCode.toUpperCase() !== derivedClass,
+            };
+          })
+          .sort((a, b) => (a.dateCreated?.getTime() ?? 0) - (b.dateCreated?.getTime() ?? 0) || a.idnumber.localeCompare(b.idnumber));
+      });
   }
 
   async getClearedMoreThanOncePopulation(): Promise<ClearedActionRow[]> {
@@ -569,6 +582,28 @@ export class MockDataProvider implements DataProvider {
       // The same source the app matches against, mirroring what the procedure does.
       lastCleared: terms.current.tradName,
       exPeriod: `${terms.current.yearCode}FA`,
+      rowsUpdated: 1,
+    };
+  }
+
+  async checkStudentClearance(id: StudentKey, _actor: string): Promise<ClearanceCheckResult> {
+    const student = this.data.students.find((s) => s.idnumber === id);
+    if (!student) return { outcome: "no_student", lastCleared: null, clearedOn: null, clearedBy: null, rowsUpdated: 0 };
+
+    // The mock's stand-in for VIEW_OURM_CLEARED: clearedBy is non-null exactly for the students the
+    // synthetic set treats as having a clearance action this term (see the view map above).
+    if (!student.clearedBy) {
+      return { outcome: "no_clearance_record", lastCleared: null, clearedOn: null, clearedBy: null, rowsUpdated: 0 };
+    }
+
+    const terms = resolveTerms(this.data.terms);
+    // The procedure takes ClearedOn from the clearance action's own date, so the mock does too.
+    const when = student.clearedAt ?? terms.current.semesterBegins;
+    return {
+      outcome: "cleared",
+      lastCleared: terms.current.tradName,
+      clearedOn: when ? new Date(when).toISOString().slice(0, 10).replace(/-/g, "") : null,
+      clearedBy: student.clearedBy,
       rowsUpdated: 1,
     };
   }
