@@ -15,21 +15,40 @@ function connect(connectionString: string, appName: string): Promise<sql.Connect
   cfg.options = { ...cfg.options, appName, readOnlyIntent: appName.includes("source"), enableArithAbort: true };
   cfg.pool = { max: 5, min: 0, idleTimeoutMillis: 30_000 };
   cfg.requestTimeout = 300_000; // snapshot jobs run in the background; the slow views need headroom
-  cfg.connectionTimeout = 20_000;
+  // Time allowed to ESTABLISH the connection (DB_CONNECT_TIMEOUT_MS, default 60 s). Separate from
+  // requestTimeout above: this one covers TCP connect, the TLS handshake and login, which is what
+  // is slow when the SQL host has been idle. A failure here reads "Failed to connect to HOST:PORT
+  // in Nms" and is a reachability problem, not a query problem.
+  cfg.connectionTimeout = getConfig().DB_CONNECT_TIMEOUT_MS;
   return new sql.ConnectionPool(cfg).connect();
+}
+
+/**
+ * A failed connect must not poison the cached pool promise.
+ *
+ * `pool ??= connect(...)` caches the rejected promise, so once the first sign-in of the day fails
+ * every later attempt fails instantly with the same stale error — which is why the log shows a
+ * 20-second timeout followed by 500s returning in 16ms. Clearing the slot on rejection means the
+ * next request genuinely retries.
+ */
+function cache(current: Promise<sql.ConnectionPool> | null, make: () => Promise<sql.ConnectionPool>, clear: () => void): Promise<sql.ConnectionPool> {
+  if (current) return current;
+  const p = make();
+  p.catch(clear);
+  return p;
 }
 
 export function getSourcePool(): Promise<sql.ConnectionPool> {
   const cs = getConfig().OUSADB_CONNECTION_STRING;
   if (!cs) throw new Error("OUSADB_CONNECTION_STRING is not configured");
-  sourcePool ??= connect(cs, "jadi-dashboard-source");
+  sourcePool = cache(sourcePool, () => connect(cs, "jadi-dashboard-source"), () => (sourcePool = null));
   return sourcePool;
 }
 
 export function getDashPool(): Promise<sql.ConnectionPool> {
   const cs = getConfig().DASH_CONNECTION_STRING;
   if (!cs) throw new Error("DASH_CONNECTION_STRING is not configured");
-  appPool ??= connect(cs, "jadi-dashboard-dash");
+  appPool = cache(appPool, () => connect(cs, "jadi-dashboard-dash"), () => (appPool = null));
   return appPool;
 }
 /** @deprecated use getDashPool */

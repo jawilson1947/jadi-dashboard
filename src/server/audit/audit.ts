@@ -24,6 +24,14 @@ export type AuditAction =
   | "ai.notice_draft"
   | "worksheet.view"
   | "export.create"
+  // Phase 7a. A report read is student-level (A-30), so it is audited like a profile view: the
+  // report key and the row count, never the rows. Exports stay on export.create so there is one
+  // export log rather than two.
+  | "report.view"
+  | "report.refresh"
+  // Phase 5g (A-32): the application's only write to source data. Recorded with the artifacts
+  // found and missing, so the audit row explains the state of the record it created.
+  | "student.reclaim"
   | "ai.request"
   | "admin.change"
   | "job.manual_run"

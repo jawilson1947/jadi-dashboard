@@ -40,11 +40,39 @@ DROP TABLE #enrolled; DROP TABLE #cleared;`;
  * TEL_WEB_GRP_CDE = 22 ("Incoming Transfer") wins over the class code, then FF/FR collapse to FR,
  * then blank becomes XX. Used by both the term-wide and sprint-scoped counts so they cannot drift.
  */
-function CLASS_BUCKET(alias: string): string {
+export function CLASS_BUCKET(alias: string): string {
   return `CASE WHEN LTRIM(RTRIM(CAST(${alias}.TEL_WEB_GRP_CDE AS varchar(10)))) = '22' THEN 'TR'
               WHEN UPPER(LTRIM(RTRIM(ISNULL(${alias}.CURRENT_CLASS_CDE, '')))) IN ('FF', 'FR') THEN 'FR'
               WHEN LTRIM(RTRIM(ISNULL(${alias}.CURRENT_CLASS_CDE, ''))) = '' THEN 'XX'
               ELSE UPPER(LTRIM(RTRIM(${alias}.CURRENT_CLASS_CDE))) END`;
+}
+
+/**
+ * Paging without OFFSET/FETCH.
+ *
+ * ousadb runs at database compatibility level 100 (SQL Server 2008) on a 2019 server, and
+ * OFFSET ... FETCH NEXT needs level 110. The connection's current database decides which rules
+ * apply, so every statement the application sends to ousadb is parsed at 2008 level — which is
+ * also why TRY_CONVERT and THROW are absent from this codebase.
+ *
+ * ROW_NUMBER() is available from 2005, so it pages at any level. The ORDER BY is duplicated into
+ * the window and the outer sort deliberately: the window decides which rows fall in the page, the
+ * outer ORDER BY decides the order they come back in, and dropping the second one would leave the
+ * page's own ordering to the optimiser.
+ */
+function paged(select: string, from: string, orderBy: string, chained = false): string {
+  // `chained` matters: PRELUDE ends with an OPEN `WITH cur AS (...), prev AS (...)`, so its page
+  // must be appended as another CTE in the same WITH. Starting a second `WITH` after the first is
+  // a syntax error, and the kind that only shows up against a real server.
+  const open = chained ? `, page AS (` : `WITH page AS (`;
+  return `${open}
+  SELECT ${select},
+         ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS __rn
+  ${from}
+)
+SELECT * FROM page
+WHERE __rn > @offset AND __rn <= @offset + @pageSize
+ORDER BY __rn;`;
 }
 
 export const Q = {
@@ -163,18 +191,19 @@ FROM #first f JOIN [jadi].[dbo].[student_master] sm ON CAST(sm.ID_NUM AS varchar
 GROUP BY ${CLASS_BUCKET("sm")};`,
 
   /** Students behind a sprint cell (day / operator / classification). Filters are parameterized. */
-  sprintStudentPage: (where: string, sortColumn: string, dir: "ASC" | "DESC") => `
-SELECT S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode, S.ClearedCurrentSession, S.AccountBalance, S.LastCleared,
-       f.ClearedBy, f.DateCleared,
-       CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
-       CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer
-FROM #first f
-JOIN dbo.tblStudent S ON S.idnumber = f.idnumber
-LEFT JOIN #enrolled e ON e.idnumber = f.idnumber
-LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = f.idnumber
-WHERE ${where}
-ORDER BY ${sortColumn} ${dir}, S.idnumber
-OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;`,
+  sprintStudentPage: (where: string, sortColumn: string, dir: "ASC" | "DESC") =>
+    paged(
+      `S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode, S.ClearedCurrentSession, S.AccountBalance, S.LastCleared,
+         f.ClearedBy, f.DateCleared,
+         CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
+         CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer`,
+      `FROM #first f
+  JOIN dbo.tblStudent S ON S.idnumber = f.idnumber
+  LEFT JOIN #enrolled e ON e.idnumber = f.idnumber
+  LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = f.idnumber
+  WHERE ${where}`,
+      `${sortColumn} ${dir}, S.idnumber`,
+    ),
 
   sprintStudentCount: (where: string) => `
 SELECT COUNT(*) AS n
@@ -231,18 +260,21 @@ ORDER BY 1;`,
    * Student page. Incoming-transfer flag (A-19) needs student_master.TEL_WEB_GRP_CDE from the co-located
    * [jadi] database; LEFT JOIN so a missing grant degrades to "not transfer" rather than failing.
    */
-  studentPage: (where: string, sortColumn: string, dir: "ASC" | "DESC") => `${PRELUDE}
-SELECT S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode, S.ClearedCurrentSession, S.AccountBalance, S.LastCleared,
-       c.ClearedBy, c.DateCleared,
-       CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
-       CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer
-FROM dbo.tblStudent S
-LEFT JOIN #cleared c ON c.idnumber = S.idnumber
-LEFT JOIN #enrolled e ON e.idnumber = S.idnumber
-LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = S.idnumber
-WHERE ${where}
-ORDER BY ${sortColumn} ${dir}, S.idnumber
-OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;${EPILOGUE}`,
+  studentPage: (where: string, sortColumn: string, dir: "ASC" | "DESC") =>
+    `${PRELUDE}
+${paged(
+      `S.idnumber, S.lastname, S.firstname, S.midname, S.pid, S.email, S.cCode, S.ClearedCurrentSession, S.AccountBalance, S.LastCleared,
+         c.ClearedBy, c.DateCleared,
+         CASE WHEN e.idnumber IS NULL THEN 0 ELSE 1 END AS enrolled,
+         CASE WHEN SM.TEL_WEB_GRP_CDE = '22' THEN 1 ELSE 0 END AS isIncomingTransfer`,
+      `FROM dbo.tblStudent S
+  LEFT JOIN #cleared c ON c.idnumber = S.idnumber
+  LEFT JOIN #enrolled e ON e.idnumber = S.idnumber
+  LEFT JOIN [jadi].[dbo].[student_master] SM ON CAST(SM.ID_NUM AS varchar(50)) = S.idnumber
+  WHERE ${where}`,
+      `${sortColumn} ${dir}, S.idnumber`,
+      true, // PRELUDE leaves a WITH open
+    )}${EPILOGUE}`,
 
   /**
    * The whole DNR/DNC population (Spec §8) in one batch: both categories, the A-1 rules verbatim

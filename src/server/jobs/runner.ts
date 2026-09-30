@@ -5,6 +5,7 @@ import { getDataProvider } from "../repositories";
 import type { DataProvider } from "../repositories/types";
 import { getAppStore } from "../store";
 import type { AppStore, JobKey, JobRunRecord } from "../store/types";
+import { STUDENT_LEVEL_FAMILIES } from "../store/types";
 import { getJobDefinition, JOB_DEFINITIONS, toRecord } from "./definitions";
 
 /** A lock older than this is considered abandoned (crashed worker) and may be taken over. */
@@ -81,6 +82,9 @@ export async function runJob(key: JobKey, opts: RunOptions): Promise<JobRunRecor
       payload: result.payload,
       rowCount: result.rowCount,
     });
+    // A-30: report families carry student IDs, so the superseded population is deleted rather than
+    // left at rest in dash. Aggregate families keep their history, which the trends depend on.
+    if (STUDENT_LEVEL_FAMILIES.includes(def.family)) await store.pruneSnapshots(def.family, 1);
     const finished = { status: "SUCCEEDED" as const, finishedAt: capturedAt, durationMs: capturedAt.getTime() - startedAt.getTime(), rowsProcessed: result.rowCount, errorSummary: null };
     await store.finishRun(run.id, finished);
     return { ...run, ...finished };

@@ -16,7 +16,13 @@ export type JobKey =
   | "history.enrollmentClearance"
   | "history.globalBalances"
   | "history.receivablesBySemester"
-  | "metadata.terms";
+  | "metadata.terms"
+  // Phase 7a report snapshots (A-30). Each captures one report's population.
+  | "report.unclassified"
+  | "report.freshmanAnalysis"
+  | "report.clearedMoreThanOnce"
+  | "report.enrolleeBalance"
+  | "report.currentlyCleared";
 
 export interface JobDefinitionRecord {
   key: JobKey;
@@ -55,7 +61,23 @@ export type MetricFamily =
   | "historyEnrollment"
   | "historyBalances"
   | "historyReceivables"
-  | "terms";
+  | "terms"
+  // Phase 7a (A-30). Unlike every family above, these payloads carry student IDs plus derived
+  // codes — never names, emails, balances or PID, which the page joins live from dbo.tblStudent.
+  | "reportUnclassified"
+  | "reportFreshmanAnalysis"
+  | "reportClearedMoreThanOnce"
+  | "reportEnrolleeBalance"
+  | "reportCurrentlyCleared";
+
+/** The families whose payloads carry student identifiers (A-30) and are therefore pruned on refresh. */
+export const STUDENT_LEVEL_FAMILIES: readonly MetricFamily[] = [
+  "reportUnclassified",
+  "reportFreshmanAnalysis",
+  "reportClearedMoreThanOnce",
+  "reportEnrolleeBalance",
+  "reportCurrentlyCleared",
+] as const;
 
 export interface SnapshotRecord<T = unknown> {
   id: string;
@@ -102,6 +124,23 @@ export interface OperatorProfileRecord {
   updatedBy: string | null;
 }
 
+/**
+ * A student reclaimed from Jenzabar (STUDENT-RECLAIM-PLAN §4.3). Written by
+ * dbo.usp_ReclaimStudentFromJenzabar inside the same transaction as the insert, so a reclaimed
+ * record cannot exist without its log row. The app reads it to warn that a record is incomplete.
+ */
+export interface ReclaimedStudentRecord {
+  idnumber: string;
+  reclaimedAt: Date;
+  reclaimedBy: string;
+  hadNameRecord: boolean;
+  hadBiograph: boolean;
+  hadQualifyingAddress: boolean;
+  source: string;
+  resolvedAt: Date | null;
+  resolvedBy: string | null;
+}
+
 export interface AppStore {
   // jobs
   listJobs(): Promise<JobDefinitionRecord[]>;
@@ -121,6 +160,12 @@ export interface AppStore {
   previousSnapshot<T = unknown>(family: MetricFamily, before: Date): Promise<SnapshotRecord<T> | null>;
   /** Latest snapshot of a family per term key, newest first — the archive the sprint overlay reads (Spec §7.4). */
   latestSnapshotsByTerm<T = unknown>(family: MetricFamily, limit?: number): Promise<SnapshotRecord<T>[]>;
+  /**
+   * Delete all but the newest `keep` snapshots of a family (A-30). Report families carry student
+   * identifiers, so a refresh replaces rather than accumulates; aggregate families are never pruned.
+   * Returns the number of snapshots removed.
+   */
+  pruneSnapshots(family: MetricFamily, keep: number): Promise<number>;
   // sprint windows (A-10)
   listSprintWindows(): Promise<SprintWindowRecord[]>;
   getSprintWindow(termKey: string): Promise<SprintWindowRecord | null>;
@@ -131,6 +176,17 @@ export interface AppStore {
   upsertOperatorProfile(record: OperatorProfileRecord): Promise<void>;
   /** Returns false when no profile has that id — a delete of something already gone is not an error. */
   deleteOperatorProfile(id: string): Promise<boolean>;
+  // reclaimed students (A-32)
+  /** Null when the student was not reclaimed by this application — the normal case. */
+  getReclaimedStudent(idnumber: string): Promise<ReclaimedStudentRecord | null>;
+  /** Open reclaims (gaps not yet filled), newest first — the follow-up worklist. */
+  listReclaimedStudents(onlyUnresolved?: boolean, limit?: number): Promise<ReclaimedStudentRecord[]>;
+  /**
+   * Fallback used only when the stored procedure could not write the row itself (an older
+   * procedure, or a store that is not the ousadb dash schema). Never the primary path.
+   */
+  recordReclaimedStudent(record: ReclaimedStudentRecord): Promise<void>;
+
   // settings
   getSetting<T = unknown>(key: string): Promise<T | null>;
   setSetting<T = unknown>(key: string, value: T, updatedBy: string | null): Promise<void>;

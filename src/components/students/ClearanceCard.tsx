@@ -70,7 +70,7 @@ export function ClearanceCard({ analysis }: { analysis: ClearanceAnalysis }) {
               </tr>
               <tr className="border-t border-border font-medium">
                 <td className="px-3 py-2" colSpan={3}>Net amount</td>
-                <td className="px-3 py-2 text-right tabular">{formatCurrency(analysis.worksheetNetAmount)}</td>
+                <td className={`px-3 py-2 text-right tabular ${analysis.worksheetNetAmount < 0 ? "text-good" : ""}`}>{formatCurrency(analysis.worksheetNetAmount)}</td>
               </tr>
             </tfoot>
           </table>

@@ -19,6 +19,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "src/generated/**",
+    // Files staged for removal, kept only because deletion needed a separate approval. They are
+    // throwaway probe scripts, not application code, and linting them says nothing useful.
+    "_to_delete/**",
   ]),
 ]);
 

@@ -47,6 +47,13 @@ const envSchema = z.object({
   /** Worker identity for job locks (defaults to hostname:pid). */
   WORKER_ID: z.string().optional(),
   /** Source database (ousadb) read-only connection. Only used by the mssql provider. */
+  /**
+   * TCP connect timeout for both pools, in milliseconds. Raised from the driver's default because
+   * the SQL host can be slow to answer the first connection of the day (VM waking, DNS, a busy
+   * listener). This is the time allowed to ESTABLISH a connection, not to run a query —
+   * requestTimeout covers that separately.
+   */
+  DB_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(60_000),
   OUSADB_CONNECTION_STRING: z.string().optional(),
   /* ── Phase 5 — Student subsystem (docs/STUDENT-PLAN.md) ────────────────────────────────── */
   /** UNC path or folder holding <idnumber>.jpg student photos (A-27). Unset = the card shows a placeholder. */

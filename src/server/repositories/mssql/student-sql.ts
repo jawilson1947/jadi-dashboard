@@ -89,6 +89,65 @@ WHERE ID_NUM = @id AND SUBSID_CDE = 'AR'
 ORDER BY TRANS_DTE DESC;`,
 
   /**
+   * Reclaim diagnostic (STUDENT-RECLAIM-PLAN §4) — why is this one id missing from tblStudent?
+   *
+   * Four existence checks and the address-code list for a single bound id. Sub-second, so it runs
+   * inline on the not-found card; the set-wide equivalent is db/sql/DiagnoseMissingStudents.sql and
+   * answers a different question (how many, and why) that does not belong on a lookup page.
+   *
+   * student_master.ID_NUM is numeric and tblStudent.idnumber is varchar, so the id is compared
+   * numerically — the same implicit conversion the nightly loader's EXCEPT relies on. Without it a
+   * padded id reads as "not in Jenzabar either" for a student who is plainly there.
+   *
+   * addressCodes is the most useful line on the panel: the common cause is not "no address" but
+   * "an address under a code the loader does not look for", and naming that code points at the
+   * loader's WHERE clause rather than at this student.
+   */
+  reclaimDiagnostic: `
+SET NOCOUNT ON;
+-- No TRY_CONVERT: it needs database compatibility level 110+, and below that the parser reads it as
+-- a user function and fails with "'numeric' is not a recognized built-in function name". Validate
+-- the string, then cast — that works at any compatibility level.
+DECLARE @clean varchar(50) = LTRIM(RTRIM(ISNULL(@id, '')));
+DECLARE @n numeric(18,0) = CASE WHEN @clean <> '' AND @clean NOT LIKE '%[^0-9]%' AND LEN(@clean) <= 18
+                                THEN CAST(@clean AS numeric(18,0)) END;
+SELECT
+  -- The CASE guards the cast: SQL Server does not promise to evaluate a WHERE's conjuncts in
+  -- written order, so a junk idnumber could otherwise reach CAST and fail the whole query.
+  inTblStudent      = CASE WHEN EXISTS (SELECT 1 FROM dbo.tblStudent
+                                         WHERE CASE WHEN LTRIM(RTRIM(ISNULL(idnumber, ''))) NOT LIKE '%[^0-9]%'
+                                                     AND LEN(LTRIM(RTRIM(ISNULL(idnumber, '')))) BETWEEN 1 AND 18
+                                                    THEN CAST(LTRIM(RTRIM(idnumber)) AS numeric(18,0)) END = @n)
+                           THEN 1 ELSE 0 END,
+  hasStudentMaster  = CASE WHEN EXISTS (SELECT 1 FROM [jadi].[dbo].[student_master]  WHERE ID_NUM = @n) THEN 1 ELSE 0 END,
+  hasNameRecord     = CASE WHEN EXISTS (SELECT 1 FROM [jadi].[dbo].[name_master]     WHERE ID_NUM = @n) THEN 1 ELSE 0 END,
+  hasBiograph       = CASE WHEN EXISTS (SELECT 1 FROM [jadi].[dbo].[biograph_master] WHERE ID_NUM = @n) THEN 1 ELSE 0 END,
+  addressRows       = (SELECT COUNT(*) FROM [jadi].[dbo].[address_master] WHERE ID_NUM = @n),
+  qualifyingAddressRows = (SELECT COUNT(*) FROM [jadi].[dbo].[address_master] WHERE ID_NUM = @n
+                             AND (ADDR_CDE LIKE '%LHP%' OR ADDR_CDE LIKE '%CUR%' OR ADDR_CDE LIKE '%EML%')),
+  addressCodes      = (SELECT STUFF((SELECT DISTINCT ', ' + RTRIM(ADDR_CDE)
+                                       FROM [jadi].[dbo].[address_master]
+                                      WHERE ID_NUM = @n AND ISNULL(ADDR_CDE,'') <> ''
+                                      FOR XML PATH('')), 1, 2, '')),
+  -- The values a reclaim would write, so the confirm panel shows the real thing rather than a
+  -- generic "are you sure". Email is the REAL address (S-D3), not the batch script's placeholder.
+  lastName          = (SELECT TOP (1) RTRIM(LAST_NAME)                FROM [jadi].[dbo].[name_master] WHERE ID_NUM = @n ORDER BY ID_NUM),
+  firstName         = (SELECT TOP (1) RTRIM(ISNULL(FIRST_NAME,'nfm')) FROM [jadi].[dbo].[name_master] WHERE ID_NUM = @n ORDER BY ID_NUM),
+  middleName        = (SELECT TOP (1) RTRIM(ISNULL(MIDDLE_NAME,''))   FROM [jadi].[dbo].[name_master] WHERE ID_NUM = @n ORDER BY ID_NUM),
+  email             = (SELECT TOP (1) NULLIF(RTRIM(ISNULL(EMAIL_ADDRESS,'')),'') FROM [jadi].[dbo].[name_master] WHERE ID_NUM = @n ORDER BY ID_NUM),
+  city              = (SELECT TOP (1) ISNULL(CITY,'')    FROM [jadi].[dbo].[address_master] WHERE ID_NUM = @n
+                         AND (ADDR_CDE LIKE '%LHP%' OR ADDR_CDE LIKE '%CUR%' OR ADDR_CDE LIKE '%EML%') ORDER BY ID_NUM),
+  stateCode         = (SELECT TOP (1) ISNULL([STATE],'') FROM [jadi].[dbo].[address_master] WHERE ID_NUM = @n
+                         AND (ADDR_CDE LIKE '%LHP%' OR ADDR_CDE LIKE '%CUR%' OR ADDR_CDE LIKE '%EML%') ORDER BY ID_NUM);`,
+
+  /**
+   * The write. EXEC only — the application has no INSERT privilege on dbo and must not acquire one
+   * (S-D1). Everything the caller needs to report is in the procedure's single result row, so the
+   * application never infers an outcome from a row count.
+   */
+  reclaimExecute: `EXEC dbo.usp_ReclaimStudentFromJenzabar @id_num = @id, @actor = @actor, @allow_partial = @allowPartial;`,
+
+  /**
    * Bio Spec 1.5.1 — the institution's own worksheet procedure. Read-only, and the drop date comes
    * from tblOUSA (the isCurrent row), never from the client.
    */

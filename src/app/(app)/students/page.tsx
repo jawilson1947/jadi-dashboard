@@ -13,6 +13,9 @@ import {
   type StudentSearchResult,
   type StudentSearchResultRow,
 } from "@/server/services/students";
+import { hasPermission } from "@/server/authz/permissions";
+import { buildProposed, getReclaimView, RECLAIM_MESSAGES, type ReclaimView } from "@/server/services/reclaim";
+import { ReclaimPanel } from "@/components/students/ReclaimPanel";
 import { formatCurrency } from "@/lib/format";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { StudentSearchForm } from "@/components/students/StudentSearchForm";
@@ -27,6 +30,11 @@ const paramsSchema = z.object({
   last: optionalFilter(z.string().max(60)),
   first: optionalFilter(z.string().max(60)),
   id: optionalFilter(z.string().max(20)),
+  // Set by the reclaim route when it bounces a refusal back here, so the reason survives the
+  // redirect instead of the user landing on an unchanged page with no explanation.
+  reclaim: optionalFilter(
+    z.enum(["already_exists", "not_in_jenzabar", "no_name_record", "partial_not_allowed", "invalid_id", "unavailable"]),
+  ),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce
     .number()
@@ -88,6 +96,17 @@ export default async function StudentLookupPage({ searchParams }: { searchParams
     }
   }
 
+  /**
+   * An ID search that found nothing is the one miss worth investigating: the student may exist in
+   * Jenzabar and have been skipped by the nightly loader (STUDENT-RECLAIM-PLAN §3). Two cheap reads
+   * separate that from a mistyped ID. Deliberately NOT run for a name search — a name is not an
+   * identity to reclaim — nor when the search found something.
+   */
+  let reclaim: ReclaimView | null = null;
+  if (q.by === "id" && q.id && result !== null && result.totalRows === 0) {
+    reclaim = await getReclaimView(q.id);
+  }
+
   // The pager appends its own page/pageSize, so the base href carries only the search terms.
   const query = new URLSearchParams({ by: q.by });
   for (const [k, v] of Object.entries({ last: q.last, first: q.first, id: q.id })) {
@@ -108,10 +127,19 @@ export default async function StudentLookupPage({ searchParams }: { searchParams
       {result === null ? (
         <p className="text-sm text-ink-3">Enter a search above to begin. Nothing is loaded until you do.</p>
       ) : result.totalRows === 0 ? (
-        <div className="card">
-          <p className="text-sm">No students match that search.</p>
-          <p className="text-xs text-ink-3 mt-1">Names are matched anywhere in the field, so a partial spelling is fine; IDs are matched from the start.</p>
-        </div>
+        reclaim && reclaim.kind !== "no-match" && reclaim.diagnostic ? (
+          <ReclaimPanel
+            view={reclaim}
+            proposed={buildProposed(reclaim.diagnostic)}
+            canCreate={hasPermission(principal, "student.create")}
+            notice={q.reclaim ? RECLAIM_MESSAGES[q.reclaim] : null}
+          />
+        ) : (
+          <div className="card">
+            <p className="text-sm">No students match that search.</p>
+            <p className="text-xs text-ink-3 mt-1">Names are matched anywhere in the field, so a partial spelling is fine; IDs are matched from the start.</p>
+          </div>
+        )
       ) : (
         <>
           {result.truncated ? (

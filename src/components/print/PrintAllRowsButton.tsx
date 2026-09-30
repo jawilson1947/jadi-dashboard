@@ -12,7 +12,10 @@ export interface PrintColumn {
 }
 
 const PAGE_SIZE = 200;
-export const PRINT_ROW_CAP = 2000;
+// Raised from 2,000 with the report catalog (REPORTS-PLAN §4.3): a silent truncation on a printed
+// collection list is a different kind of error from a truncated screen, so the button says how many
+// rows it will print whenever it cannot print them all.
+export const PRINT_ROW_CAP = 5000;
 
 /**
  * Drill-down print: fetches EVERY row of the population (up to PRINT_ROW_CAP, 200 per request through the

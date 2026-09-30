@@ -80,7 +80,15 @@ export class MssqlIdentityStore implements IdentityStore {
     }
     const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const r = await req.query<UserRow & { total: number }>(
-      `SELECT ${USER_COLS.split(", ").map((c) => `u.${c}`).join(", ")}, COUNT(*) OVER () AS total FROM dash.[User] u ${w} ORDER BY u.username OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`,
+      // No OFFSET/FETCH: the dash schema lives inside ousadb, which runs at compatibility level 100,
+      // and OFFSET/FETCH needs 110. ROW_NUMBER() is available from 2005 and pages at any level.
+      // COUNT(*) OVER () is fine at 100 and still gives the unpaged total in the same round trip.
+      `WITH page AS (
+         SELECT ${USER_COLS.split(", ").map((c) => `u.${c}`).join(", ")}, COUNT(*) OVER () AS total,
+                ROW_NUMBER() OVER (ORDER BY u.username) AS __rn
+         FROM dash.[User] u ${w}
+       )
+       SELECT * FROM page WHERE __rn > @offset AND __rn <= @offset + @pageSize ORDER BY __rn`,
     );
     return { rows: await this.hydrate(r.recordset), total: r.recordset[0]?.total ?? 0 };
   }

@@ -1,6 +1,6 @@
 import { getDashPool, sql } from "../db/mssql";
 import { randomUUID } from "node:crypto";
-import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, SnapshotRecord, SprintWindowRecord } from "./types";
+import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, ReclaimedStudentRecord, SnapshotRecord, SprintWindowRecord } from "./types";
 
 /** SQL Server AppStore over ousadb schema [dash] (db/migrations/001_init.sql), login jadi_dash. */
 export class MssqlAppStore implements AppStore {
@@ -112,6 +112,20 @@ export class MssqlAppStore implements AppStore {
     return r.recordset.map((row) => mapSnapshot<T>(row));
   }
 
+  /**
+   * Keep only the newest `keep` snapshots of a family (A-30). Report payloads carry student IDs, so
+   * a refresh replaces the previous population instead of leaving copies of it at rest in dash.
+   */
+  async pruneSnapshots(family: MetricFamily, keep: number) {
+    const r = await (await this.pool()).request().input("family", sql.VarChar(50), family).input("keep", sql.Int, keep)
+      .query<{ removed: number }>(`WITH ranked AS (
+           SELECT id, ROW_NUMBER() OVER (ORDER BY capturedAt DESC) AS rn
+           FROM dash.Snapshot WHERE metricFamily = @family)
+         DELETE FROM dash.Snapshot WHERE id IN (SELECT id FROM ranked WHERE rn > @keep);
+         SELECT @@ROWCOUNT AS removed;`);
+    return r.recordset[0]?.removed ?? 0;
+  }
+
   async listSprintWindows(): Promise<SprintWindowRecord[]> {
     const r = await (await this.pool()).request().query<SprintRow>("SELECT termKey, sprintStart, sprintEnd, updatedAt, updatedBy FROM dash.SemesterSprint ORDER BY sprintStart DESC");
     return r.recordset.map(mapSprint);
@@ -169,6 +183,37 @@ export class MssqlAppStore implements AppStore {
     return (r.rowsAffected[0] ?? 0) > 0;
   }
 
+  /* ── Reclaimed students (A-32) ── */
+
+  async getReclaimedStudent(idnumber: string): Promise<ReclaimedStudentRecord | null> {
+    const r = await (await this.pool()).request().input("id", sql.VarChar(50), idnumber)
+      .query<RawReclaimed>("SELECT idnumber, reclaimedAt, reclaimedBy, hadNameRecord, hadBiograph, hadQualifyingAddress, source, resolvedAt, resolvedBy FROM dash.ReclaimedStudent WHERE idnumber = @id");
+    return r.recordset[0] ? mapReclaimed(r.recordset[0]) : null;
+  }
+
+  async listReclaimedStudents(onlyUnresolved = true, limit = 200): Promise<ReclaimedStudentRecord[]> {
+    const r = await (await this.pool()).request().input("limit", sql.Int, limit)
+      .query<RawReclaimed>(`SELECT TOP (@limit) idnumber, reclaimedAt, reclaimedBy, hadNameRecord, hadBiograph, hadQualifyingAddress, source, resolvedAt, resolvedBy
+         FROM dash.ReclaimedStudent ${onlyUnresolved ? "WHERE resolvedAt IS NULL" : ""} ORDER BY reclaimedAt DESC`);
+    return r.recordset.map(mapReclaimed);
+  }
+
+  /** Fallback only — the stored procedure writes this row itself, inside the insert transaction. */
+  async recordReclaimedStudent(rec: ReclaimedStudentRecord) {
+    await (await this.pool()).request()
+      .input("id", sql.VarChar(50), rec.idnumber)
+      .input("at", sql.DateTime2, rec.reclaimedAt)
+      .input("by", sql.VarChar(200), rec.reclaimedBy)
+      .input("n", sql.Bit, rec.hadNameRecord)
+      .input("b", sql.Bit, rec.hadBiograph)
+      .input("a", sql.Bit, rec.hadQualifyingAddress)
+      .input("src", sql.VarChar(30), rec.source)
+      .query(`MERGE dash.ReclaimedStudent AS t
+              USING (SELECT @id AS idnumber) AS s ON t.idnumber = s.idnumber
+              WHEN NOT MATCHED THEN INSERT (idnumber, reclaimedAt, reclaimedBy, hadNameRecord, hadBiograph, hadQualifyingAddress, source)
+                   VALUES (@id, @at, @by, @n, @b, @a, @src);`);
+  }
+
   async getSetting<T>(key: string) {
     const r = await (await this.pool()).request().input("key", sql.VarChar(100), key).query<{ value: string }>("SELECT value FROM dash.Setting WHERE [key] = @key");
     return r.recordset[0] ? (JSON.parse(r.recordset[0].value) as T) : null;
@@ -206,4 +251,24 @@ function mapJob(r: JobDefinitionRecord): JobDefinitionRecord {
 }
 function mapSnapshot<T>(r: SnapshotRow): SnapshotRecord<T> {
   return { ...r, capturedAt: new Date(r.capturedAt), payload: JSON.parse(r.payload) as T };
+}
+
+interface RawReclaimed {
+  idnumber: string; reclaimedAt: Date; reclaimedBy: string;
+  hadNameRecord: boolean; hadBiograph: boolean; hadQualifyingAddress: boolean;
+  source: string; resolvedAt: Date | null; resolvedBy: string | null;
+}
+
+function mapReclaimed(r: RawReclaimed): ReclaimedStudentRecord {
+  return {
+    idnumber: String(r.idnumber).trim(),
+    reclaimedAt: new Date(r.reclaimedAt),
+    reclaimedBy: r.reclaimedBy,
+    hadNameRecord: Boolean(r.hadNameRecord),
+    hadBiograph: Boolean(r.hadBiograph),
+    hadQualifyingAddress: Boolean(r.hadQualifyingAddress),
+    source: r.source,
+    resolvedAt: r.resolvedAt ? new Date(r.resolvedAt) : null,
+    resolvedBy: r.resolvedBy,
+  };
 }

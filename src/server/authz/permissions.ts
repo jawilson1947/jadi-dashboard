@@ -15,6 +15,10 @@ export const PERMISSIONS = [
   "student.clearance.analyze",
   "student.academic.view",
   "worksheet.view",
+  // Phase 5g (A-32): reclaim a student record from Jenzabar into tblStudent. This is the ONLY
+  // permission in the set that authorises a write to SOURCE data, so it is deliberately not part
+  // of any role but ADMINISTRATOR and must be granted per user.
+  "student.create",
   "export.create",
   "mailmerge.create",
   "operator.manage",

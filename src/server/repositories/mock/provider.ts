@@ -30,6 +30,14 @@ import type {
   TransactionScope,
   WorksheetItemRow,
   CostAnalysisRow,
+  UnclassifiedRow,
+  FreshmanAnalysisRow,
+  ClearedActionRow,
+  EnrolleeBalanceRow,
+  CurrentlyClearedRow,
+  StudentContactRow,
+  ReclaimDiagnostic,
+  ReclaimResult,
 } from "../types";
 import { resolveTerms } from "../types";
 import { generateSyntheticDataset, generateTransactions, type SyntheticDataset } from "./synthetic";
@@ -352,6 +360,215 @@ export class MockDataProvider implements DataProvider {
       enrolledCurrentTerm: s.enrolledCurrentTerm,
     };
   }
+
+  /* ── Phase 7a — Report populations (docs/REPORTS-PLAN.md) ── */
+
+  /**
+   * The synthetic dataset uses the same definitions as the mssql provider, so these mirror the
+   * rewritten SQL rather than the supplied scripts: enrolled = enrolledCurrentTerm, cleared = has a
+   * clearance action (clearedBy != null), raw class code = classificationCode, A-19 bucket via
+   * breakdownCode(). A report that works here works there, and the tests can run with no database.
+   */
+  async getUnclassifiedPopulation(): Promise<UnclassifiedRow[]> {
+    const unknown = (s: StudentRow) => !KNOWN_CLASS_CODES.includes(s.classificationCode.toUpperCase() as (typeof KNOWN_CLASS_CODES)[number]);
+    const rows = new Map<string, UnclassifiedRow>();
+    // Enrolled first, then cleared — the supplied script's source_priority, which decides only
+    // which row survives the dedup, never anything shown on the page.
+    for (const s of this.data.students.filter((s) => s.enrolledCurrentTerm && unknown(s))) {
+      rows.set(s.idnumber, {
+        idnumber: s.idnumber,
+        classCode: s.classificationCode.toUpperCase(),
+        resolvableAs: breakdownCode(s.classificationCode, s.isIncomingTransfer),
+        status: s.status,
+        source: "enrolled",
+      });
+    }
+    for (const s of this.data.students.filter((s) => s.clearedBy !== null && unknown(s))) {
+      if (rows.has(s.idnumber)) continue;
+      rows.set(s.idnumber, {
+        idnumber: s.idnumber,
+        classCode: s.classificationCode.toUpperCase(),
+        resolvableAs: breakdownCode(s.classificationCode, s.isIncomingTransfer),
+        status: "Cleared",
+        source: "cleared",
+      });
+    }
+    return [...rows.values()];
+  }
+
+  async getFreshmanAnalysis(): Promise<FreshmanAnalysisRow[]> {
+    const terms = resolveTerms(this.data.terms);
+    const begins = terms.current.semesterBegins ? new Date(terms.current.semesterBegins) : null;
+    return this.data.students
+      .filter((s) => ["FR", "FF"].includes(s.classificationCode.toUpperCase()))
+      .filter((s) => s.lastCleared !== null && terms.currentKeys.includes(s.lastCleared))
+      .map((s) => {
+        // Synthetic stand-in for student_master.DateCreated: deterministic per student, spread
+        // either side of the boundary so the mismatch pattern the page draws is visible in mock mode.
+        const created = syntheticCreated(s.idnumber, begins);
+        const derivedClass: "FF" | "FR" = begins && created && created > begins ? "FF" : "FR";
+        return {
+          idnumber: s.idnumber,
+          classCode: s.classificationCode.toUpperCase(),
+          webCode: s.isIncomingTransfer ? 22 : 1,
+          mostRecentYearEnrolled: terms.current.yearCode || null,
+          currentClassCode: s.classificationCode.toUpperCase(),
+          dateCreated: created,
+          semesterBegins: begins,
+          derivedClass,
+          mismatch: s.classificationCode.toUpperCase() !== derivedClass,
+        };
+      })
+      .sort((a, b) => (a.dateCreated?.getTime() ?? 0) - (b.dateCreated?.getTime() ?? 0) || a.idnumber.localeCompare(b.idnumber));
+  }
+
+  async getClearedMoreThanOncePopulation(): Promise<ClearedActionRow[]> {
+    // The synthetic set holds one action per student, so a deterministic slice is given a second
+    // one — without it the report would always be empty in mock mode and nothing would exercise
+    // the grouped layout. Seven students, matching what staging showed on 2026-09-17.
+    const cleared = this.data.students.filter((s) => s.clearedBy !== null && s.clearedAt !== null);
+    const dupes = cleared.filter((_, i) => i % 97 === 0).slice(0, 7);
+    const out: ClearedActionRow[] = [];
+    for (const s of dupes) {
+      const first = s.clearedAt as Date;
+      const second = new Date(first.getTime() + 36 * 3600 * 1000);
+      out.push(
+        { idnumber: s.idnumber, classCode: breakdownCode(s.classificationCode, s.isIncomingTransfer), dateCleared: first, clearedBy: s.clearedBy, actionNo: 1, actionCount: 2 },
+        { idnumber: s.idnumber, classCode: breakdownCode(s.classificationCode, s.isIncomingTransfer), dateCleared: second, clearedBy: "sa", actionNo: 2, actionCount: 2 },
+      );
+    }
+    return out.sort((a, b) => a.idnumber.localeCompare(b.idnumber) || a.actionNo - b.actionNo);
+  }
+
+  async getEnrolleeBalancePopulation(): Promise<EnrolleeBalanceRow[]> {
+    return this.data.students
+      .filter((s) => s.enrolledCurrentTerm && s.status !== "Cleared" && s.accountBalance > 0)
+      .map((s) => ({
+        idnumber: s.idnumber,
+        classCode: breakdownCode(s.classificationCode, s.isIncomingTransfer),
+        rawClassCode: s.classificationCode.toUpperCase(),
+      }));
+  }
+
+  async getCurrentlyClearedPopulation(): Promise<CurrentlyClearedRow[]> {
+    return this.data.students
+      .filter((s) => s.clearedBy !== null)
+      .map((s) => ({
+        idnumber: s.idnumber,
+        classCode: breakdownCode(s.classificationCode, s.isIncomingTransfer),
+        rawClassCode: s.classificationCode.toUpperCase(),
+        dateCleared: s.clearedAt,
+      }));
+  }
+
+  async getStudentContacts(ids: string[]): Promise<StudentContactRow[]> {
+    const want = new Set(ids);
+    return this.data.students
+      .filter((s) => want.has(s.idnumber))
+      .map((s) => ({
+        idnumber: s.idnumber,
+        lastName: s.lastName,
+        firstName: s.firstName,
+        email: s.email || null,
+        accountBalance: s.accountBalance,
+      }));
+  }
+
+
+  /* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
+
+  /**
+   * Mock mode has no Jenzabar, so the synthetic dataset stands in for it: a student the dataset
+   * knows about but that is marked as not loaded plays the part of a record present in
+   * student_master and absent from tblStudent.
+   *
+   * The three gap shapes are generated deterministically from the id so the panel, the warnings
+   * and the refusal paths can all be demonstrated without a database — including the case that
+   * matters most, an address that exists under a code the loader ignores.
+   */
+  async getReclaimDiagnostic(id: StudentKey): Promise<ReclaimDiagnostic> {
+    const existing = this.data.students.find((s) => s.idnumber === id);
+    if (existing) {
+      return {
+        idnumber: id,
+        inTblStudent: true,
+        hasStudentMaster: true,
+        hasNameRecord: true,
+        hasBiograph: true,
+        addressRows: 1,
+        qualifyingAddressRows: 1,
+        addressCodes: "LHP",
+        proposed: { lastName: existing.lastName, firstName: existing.firstName, middleName: existing.middleName, email: existing.email || null, city: null, stateCode: null },
+      };
+    }
+    // An id that is not numeric, or outside the synthetic range, stands for "not in Jenzabar".
+    const n = Number(id);
+    if (!Number.isFinite(n) || String(Math.trunc(n)).length < 4) {
+      return { idnumber: id, inTblStudent: false, hasStudentMaster: false, hasNameRecord: false, hasBiograph: false, addressRows: 0, qualifyingAddressRows: 0, addressCodes: null, proposed: { lastName: null, firstName: null, middleName: null, email: null, city: null, stateCode: null } };
+    }
+    // Otherwise: present in Jenzabar, with a gap shape chosen by the id so every branch is reachable.
+    const shape = Math.trunc(n) % 4;
+    const hasBiograph = shape !== 1 && shape !== 3;
+    const qualifying = shape === 2 || shape === 3 ? 0 : 1;
+    // Always true: the mock has no "missing name" shape, because that path is a refusal rather than
+    // a gap and is covered by the unit tests. An earlier version wrote `shape !== 3 || true`, which
+    // is just `true` with a misleading condition attached.
+    const hasName = true;
+    return {
+      idnumber: id,
+      inTblStudent: false,
+      hasStudentMaster: true,
+      hasNameRecord: hasName,
+      hasBiograph,
+      addressRows: qualifying === 0 ? 2 : 1,
+      qualifyingAddressRows: qualifying,
+      // The realistic failure: addresses exist, but under codes the loader's WHERE clause ignores.
+      addressCodes: qualifying === 0 ? "PRM, BIL" : "LHP",
+      proposed: {
+        lastName: "SYNTHETIC",
+        firstName: "STUDENT",
+        middleName: "",
+        email: `student${Math.trunc(n)}@example.edu`,
+        city: qualifying ? "Huntsville" : null,
+        stateCode: qualifying ? "AL" : null,
+      },
+    };
+  }
+
+  /** Mock mode never writes anything; it reports the outcome the rules would produce. */
+  async reclaimStudent(id: StudentKey, _actor: string, allowPartial: boolean): Promise<ReclaimResult> {
+    const d = await this.getReclaimDiagnostic(id);
+    const base = {
+      hasStudentMaster: d.hasStudentMaster,
+      hasNameRecord: d.hasNameRecord,
+      hasBiograph: d.hasBiograph,
+      hasQualifyingAddress: d.qualifyingAddressRows > 0,
+      addressRows: d.addressRows,
+      rowsInserted: 0,
+    };
+    if (d.inTblStudent) return { ...base, outcome: "already_exists" };
+    if (!d.hasStudentMaster) return { ...base, outcome: "not_in_jenzabar" };
+    if (!d.hasNameRecord) return { ...base, outcome: "no_name_record" };
+    if ((!d.hasBiograph || d.qualifyingAddressRows === 0) && !allowPartial) return { ...base, outcome: "partial_not_allowed" };
+    return { ...base, outcome: "inserted", rowsInserted: 1 };
+  }
+
+}
+
+/** Classification codes the application recognises — mirrors KNOWN_CLASS_CODES in the report SQL. */
+const KNOWN_CLASS_CODES = ["AD", "AE", "EM", "FF", "FR", "GR", "JR", "SO", "SR", "DI"] as const;
+
+/**
+ * Deterministic stand-in for student_master.DateCreated in mock mode: a stable offset of -60..+29
+ * days around the semester start, derived from the id so the same student always lands on the same
+ * day. Roughly a third fall after the boundary, which is what makes R2's mismatch pattern visible
+ * without a database.
+ */
+function syntheticCreated(id: string, begins: Date | null): Date | null {
+  if (!begins) return null;
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 90;
+  return new Date(begins.getTime() + (h - 60) * 24 * 3600 * 1000);
 }
 
 function sum(rows: StudentRow[]): number {

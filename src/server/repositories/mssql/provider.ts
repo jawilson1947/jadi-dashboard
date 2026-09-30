@@ -28,12 +28,22 @@ import type {
   TransactionScope,
   WorksheetItemRow,
   CostAnalysisRow,
+  UnclassifiedRow,
+  FreshmanAnalysisRow,
+  ClearedActionRow,
+  EnrolleeBalanceRow,
+  CurrentlyClearedRow,
+  StudentContactRow,
+  ReclaimDiagnostic,
+  ReclaimResult,
+  ReclaimOutcome,
 } from "../types";
 import { DataSourceUnavailableError, resolveTerms } from "../types";
 import { parseCompactDate } from "@/lib/format";
 import { escapeLike } from "@/lib/search";
 import { Q } from "./sql";
 import { QS } from "./student-sql";
+import { RQ } from "./report-sql";
 import { getConfig } from "../../db/config";
 
 /**
@@ -47,6 +57,9 @@ import { getConfig } from "../../db/config";
  *   - never queries VIEW_OURM_FCA for aggregates (40–120 s); uses VIEW_OURM + tblStudent instead
  * All statements are parameterized; the SQL text lives in ./sql.ts.
  */
+/** How long the cross-server global history query may take before the card gives up (A-24). */
+const GLOBAL_TIMEOUT_MS = 20_000;
+
 export class MssqlDataProvider implements DataProvider {
   readonly name = "mssql" as const;
 
@@ -274,7 +287,36 @@ export class MssqlDataProvider implements DataProvider {
       );
     }
     const text = scope === "global" ? QS.globalTransactions(cfg.TRANS_HIST_GLOBAL_SERVER) : QS.currentTermTransactions;
-    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawTransaction>(text);
+    const req = (await this.pool()).request().input("id", sql.VarChar(50), id);
+
+    /**
+     * The global query crosses a linked server, so it can fail in ways a local query cannot: the
+     * remote host may be unreachable, asleep, or on a subnet this server cannot route to. The pool's
+     * 5-minute requestTimeout exists for background snapshot jobs and is far too long for a card on
+     * a page someone is waiting in front of, so this one is cancelled after GLOBAL_TIMEOUT_MS.
+     *
+     * Any failure here is reported as DataSourceUnavailableError, which the profile page already
+     * renders as an "unavailable" card. Previously a transport error (tedious RequestError, e.g.
+     * "TCP Provider: The wait operation timed out") escaped that check and took down the whole
+     * profile — reached most easily by a reclaimed student, whose LastCleared of 'XX0000' routes
+     * them to the global card automatically.
+     */
+    if (scope === "global") {
+      const timer = setTimeout(() => req.cancel(), GLOBAL_TIMEOUT_MS);
+      try {
+        const r = await req.query<RawTransaction>(text);
+        return r.recordset.map(mapTransaction);
+      } catch (err) {
+        throw new DataSourceUnavailableError(
+          `The global transaction archive did not respond within ${Math.round(GLOBAL_TIMEOUT_MS / 1000)}s. It is read through a linked server (ASSUMPTIONS A-24); check that the host is reachable from the SQL Server.`,
+          err,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    const r = await req.query<RawTransaction>(text);
     return r.recordset.map(mapTransaction);
   }
 
@@ -331,6 +373,162 @@ export class MssqlDataProvider implements DataProvider {
   async checkTerms() {
     return resolveTerms(await this.getTermMetadata());
   }
+  /* ── Phase 7a — Report populations (docs/REPORTS-PLAN.md) ── */
+
+  async getUnclassifiedPopulation(): Promise<UnclassifiedRow[]> {
+    const r = await (await this.pool()).request().query<RawUnclassified>(RQ.unclassified);
+    return r.recordset.map((x) => ({
+      idnumber: String(x.idnumber),
+      classCode: x.classCode ?? "",
+      resolvableAs: x.resolvableAs ?? "",
+      status: x.status,
+      source: x.source,
+    }));
+  }
+
+  async getFreshmanAnalysis(): Promise<FreshmanAnalysisRow[]> {
+    const r = await (await this.pool()).request().query<RawFreshman>(RQ.freshmanAnalysis);
+    return r.recordset.map((x) => ({
+      idnumber: String(x.idnumber),
+      classCode: x.classCode ?? "",
+      webCode: x.webCode ?? null,
+      mostRecentYearEnrolled: text(x.mostRecentYearEnrolled),
+      currentClassCode: x.currentClassCode ?? "",
+      dateCreated: x.dateCreated ? new Date(x.dateCreated) : null,
+      semesterBegins: x.semesterBegins ? new Date(x.semesterBegins) : null,
+      derivedClass: x.derivedClass,
+      mismatch: Boolean(x.mismatch),
+    }));
+  }
+
+  async getClearedMoreThanOncePopulation(): Promise<ClearedActionRow[]> {
+    const r = await (await this.pool()).request().query<RawClearedAction>(RQ.clearedMoreThanOnce);
+    return r.recordset.map((x) => ({
+      idnumber: String(x.idnumber),
+      classCode: x.classCode ?? "",
+      dateCleared: x.dateCleared ? new Date(x.dateCleared) : null,
+      clearedBy: x.clearedBy ?? null,
+      actionNo: Number(x.actionNo),
+      actionCount: Number(x.actionCount),
+    }));
+  }
+
+  async getEnrolleeBalancePopulation(): Promise<EnrolleeBalanceRow[]> {
+    const r = await (await this.pool()).request().query<RawEnrolleeBalance>(RQ.enrolleeBalancePopulation);
+    return r.recordset.map((x) => ({
+      idnumber: String(x.idnumber),
+      classCode: x.classCode ?? "",
+      rawClassCode: x.rawClassCode ?? "",
+    }));
+  }
+
+  async getCurrentlyClearedPopulation(): Promise<CurrentlyClearedRow[]> {
+    const r = await (await this.pool()).request().query<RawCurrentlyCleared>(RQ.currentlyCleared);
+    return r.recordset.map((x) => ({
+      idnumber: String(x.idnumber),
+      classCode: x.classCode ?? "",
+      rawClassCode: x.rawClassCode ?? "",
+      dateCleared: x.dateCleared ? new Date(x.dateCleared) : null,
+    }));
+  }
+
+  /**
+   * The live half of a report row (A-30). Ids are bound as individual parameters in batches rather
+   * than interpolated into an IN list: the values come from a snapshot this application wrote, but
+   * a parameterised query is the rule here regardless of how trustworthy the source looks today.
+   */
+  async getStudentContacts(ids: string[]): Promise<StudentContactRow[]> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const out: StudentContactRow[] = [];
+    const BATCH = 500;
+    for (let i = 0; i < unique.length; i += BATCH) {
+      const chunk = unique.slice(i, i + BATCH);
+      const req = (await this.pool()).request();
+      const names = chunk.map((id, n) => {
+        req.input(`id${n}`, sql.VarChar(50), id);
+        return `@id${n}`;
+      });
+      const r = await req.query<RawContact>(
+        `SELECT idnumber, lastname, firstname, email, AccountBalance
+         FROM dbo.tblStudent WHERE idnumber IN (${names.join(", ")});`,
+      );
+      for (const x of r.recordset) {
+        out.push({
+          idnumber: String(x.idnumber),
+          lastName: x.lastname ?? "",
+          firstName: x.firstname ?? "",
+          email: text(x.email),
+          accountBalance: money(x.AccountBalance),
+        });
+      }
+    }
+    return out;
+  }
+
+
+  /* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
+
+  async getReclaimDiagnostic(id: StudentKey): Promise<ReclaimDiagnostic> {
+    const r = await (await this.pool()).request().input("id", sql.VarChar(50), id).query<RawDiagnostic>(QS.reclaimDiagnostic);
+    const x = r.recordset[0];
+    if (!x) throw new DataSourceUnavailableError("The reclaim diagnostic returned no row.");
+    return {
+      idnumber: String(id),
+      inTblStudent: Boolean(x.inTblStudent),
+      hasStudentMaster: Boolean(x.hasStudentMaster),
+      hasNameRecord: Boolean(x.hasNameRecord),
+      hasBiograph: Boolean(x.hasBiograph),
+      addressRows: Number(x.addressRows ?? 0),
+      qualifyingAddressRows: Number(x.qualifyingAddressRows ?? 0),
+      addressCodes: text(x.addressCodes),
+      proposed: {
+        lastName: text(x.lastName),
+        firstName: text(x.firstName),
+        middleName: text(x.middleName),
+        email: text(x.email),
+        city: text(x.city),
+        stateCode: text(x.stateCode),
+      },
+    };
+  }
+
+  /**
+   * EXEC only. The application has no INSERT privilege on dbo and must not acquire one (S-D1);
+   * everything the caller reports comes from the procedure's own result row rather than from a
+   * row count, so an unexpected shape is an error rather than a silent "probably worked".
+   */
+  async reclaimStudent(id: StudentKey, actor: string, allowPartial: boolean): Promise<ReclaimResult> {
+    try {
+      const r = await (await this.pool())
+        .request()
+        .input("id", sql.VarChar(50), id)
+        .input("actor", sql.VarChar(200), actor)
+        .input("allowPartial", sql.Bit, allowPartial)
+        .query<RawReclaim>(QS.reclaimExecute);
+      const x = r.recordset[0];
+      if (!x) throw new DataSourceUnavailableError("The reclaim procedure returned no outcome.");
+      return {
+        outcome: x.outcome as ReclaimOutcome,
+        hasStudentMaster: Boolean(x.hasStudentMaster),
+        hasNameRecord: Boolean(x.hasNameRecord),
+        hasBiograph: Boolean(x.hasBiograph),
+        hasQualifyingAddress: Boolean(x.hasQualifyingAddress),
+        addressRows: Number(x.addressRows ?? 0),
+        rowsInserted: Number(x.rowsInserted ?? 0),
+      };
+    } catch (err) {
+      // Until a DBA runs db/production/10_usp_reclaim_student.sql the procedure does not exist, and
+      // that is the expected state rather than a fault. Surfacing it as "unavailable" lets the page
+      // show the diagnostic — which is the useful half — with the offer explained away.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/Could not find stored procedure|permission was denied|EXECUTE permission/i.test(msg)) {
+        throw new DataSourceUnavailableError("The reclaim procedure is not installed or not granted.", err);
+      }
+      throw err;
+    }
+  }
+
 }
 
 /** Multi-statement batches (temp-table prelude) return their SELECT as the final recordset. */
@@ -471,7 +669,17 @@ function mapStudent(r: RawStudent): StudentRow {
     clearedAt: r.DateCleared ? new Date(r.DateCleared) : null,
     enrolledCurrentTerm: Boolean(r.enrolled),
   };
+
 }
+
+interface RawUnclassified { idnumber: string | number; classCode: string; resolvableAs: string; status: string; source: "enrolled" | "cleared" }
+interface RawFreshman { idnumber: string | number; classCode: string; webCode: number | null; mostRecentYearEnrolled: string | number | null; currentClassCode: string; dateCreated: string | Date | null; semesterBegins: string | Date | null; derivedClass: "FF" | "FR"; mismatch: boolean | number }
+interface RawClearedAction { idnumber: string | number; classCode: string; dateCleared: string | Date | null; clearedBy: string | null; actionNo: number; actionCount: number }
+interface RawEnrolleeBalance { idnumber: string | number; classCode: string; rawClassCode: string }
+interface RawCurrentlyCleared { idnumber: string | number; classCode: string; rawClassCode: string; dateCleared: string | Date | null }
+interface RawDiagnostic { inTblStudent: number; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; addressRows: number; qualifyingAddressRows: number; addressCodes: string | null; lastName: string | null; firstName: string | null; middleName: string | null; email: string | null; city: string | null; stateCode: string | null }
+interface RawReclaim { outcome: string; hasStudentMaster: number; hasNameRecord: number; hasBiograph: number; hasQualifyingAddress: number; addressRows: number; rowsInserted: number }
+interface RawContact { idnumber: string | number; lastname: string | null; firstname: string | null; email: string | number | null; AccountBalance: number | string | null }
 
 /**
  * Bind a calendar date as an explicit UTC-midnight Date. tedious writes `date` parameters from the
@@ -480,6 +688,17 @@ function mapStudent(r: RawStudent): StudentRow {
  */
 function utcDate(iso: string): Date {
   return new Date(`${iso}T00:00:00Z`);
+}
+
+/**
+ * Trim a column that may not be a string. Several Jenzabar columns are numeric or char(n) depending
+ * on the object, and calling .trim() on a number throws at runtime rather than at compile time —
+ * which is exactly how this surfaced on the Freshman report's MOST_RECNT_YR_ENR.
+ */
+function text(v: string | number | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
 }
 
 /** SQL money/numeric arrive as JS numbers from tedious; normalise nulls and rounding. */

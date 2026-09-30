@@ -321,6 +321,123 @@ export interface CostAnalysisRow {
   credits: number;
 }
 
+/* ── Phase 7a — Report catalog (docs/REPORTS-PLAN.md) ── */
+
+/**
+ * Report populations are ID lists plus derived codes (A-30). Names, emails and balances are
+ * deliberately absent: they are joined live from tblStudent at read time via getStudentContacts,
+ * so a snapshot taken at 02:15 can never serve a stale balance on a collection report.
+ */
+export interface UnclassifiedRow {
+  idnumber: string;
+  /** RAW student_master.CURRENT_CLASS_CDE, blank as "" — the defect, and the selection key (R-D5). */
+  classCode: string;
+  /** A-19 reading. Differs from classCode only when TEL_WEB_GRP_CDE resolves it — the triage signal. */
+  resolvableAs: string;
+  status: string;
+  source: "enrolled" | "cleared";
+}
+
+export interface FreshmanAnalysisRow {
+  idnumber: string;
+  /** tblStudent.cCode — FR or FF by definition of the report's WHERE clause. */
+  classCode: string;
+  webCode: number | null;
+  mostRecentYearEnrolled: string | null;
+  currentClassCode: string;
+  dateCreated: Date | null;
+  semesterBegins: Date | null;
+  derivedClass: "FF" | "FR";
+  /** classCode <> derivedClass. A warning, not a defect — see A-30's sibling R-D7 in REPORTS-PLAN §1.4. */
+  mismatch: boolean;
+}
+
+export interface ClearedActionRow {
+  idnumber: string;
+  classCode: string;
+  dateCleared: Date | null;
+  clearedBy: string | null;
+  actionNo: number;
+  actionCount: number;
+}
+
+export interface EnrolleeBalanceRow {
+  idnumber: string;
+  classCode: string;
+  rawClassCode: string;
+}
+
+export interface CurrentlyClearedRow {
+  idnumber: string;
+  /** A-19 bucket — R6 is an operational roster and must agree with the dashboard (R-D5). */
+  classCode: string;
+  rawClassCode: string;
+  dateCleared: Date | null;
+}
+
+/** The live half of a report row (A-30): never snapshotted, always read fresh. PID is never included. */
+export interface StudentContactRow {
+  idnumber: string;
+  lastName: string;
+  firstName: string;
+  email: string | null;
+  accountBalance: number;
+}
+
+/* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
+
+/**
+ * Why one id is missing from tblStudent. Four existence checks against the objects the nightly
+ * loader inner-joins, plus the values a reclaim would write, so the confirm panel can show the
+ * real thing rather than a generic prompt.
+ */
+export interface ReclaimDiagnostic {
+  idnumber: string;
+  /** True when the student is already present — the caller should not have asked. */
+  inTblStudent: boolean;
+  hasStudentMaster: boolean;
+  hasNameRecord: boolean;
+  hasBiograph: boolean;
+  /** Rows in address_master under ANY code. */
+  addressRows: number;
+  /** Rows under a code the loader looks for (%LHP%, %CUR%, %EML%). */
+  qualifyingAddressRows: number;
+  /**
+   * Every ADDR_CDE the student carries, comma separated. The usual cause of a miss is an address
+   * under a code the loader ignores, and naming it points at the loader rather than the student.
+   */
+  addressCodes: string | null;
+  /** The values that would be written. Absent where the source record is missing. */
+  proposed: {
+    lastName: string | null;
+    firstName: string | null;
+    middleName: string | null;
+    /** The REAL address from name_master (S-D3), not the batch script's placeholder. */
+    email: string | null;
+    city: string | null;
+    stateCode: string | null;
+  };
+}
+
+/** What the stored procedure did. Never inferred from a row count. */
+export type ReclaimOutcome =
+  | "inserted"
+  | "already_exists"
+  | "not_in_jenzabar"
+  | "no_name_record"
+  | "partial_not_allowed"
+  | "invalid_id";
+
+export interface ReclaimResult {
+  outcome: ReclaimOutcome;
+  hasStudentMaster: boolean;
+  hasNameRecord: boolean;
+  hasBiograph: boolean;
+  hasQualifyingAddress: boolean;
+  addressRows: number;
+  rowsInserted: number;
+}
+
 export interface DataProvider {
   readonly name: SourceInfo["provider"];
   getSourceInfo(): Promise<SourceInfo>;
@@ -369,6 +486,34 @@ export interface DataProvider {
   getClearanceWorksheetItems(id: StudentKey, dropClassesDate: string): Promise<WorksheetItemRow[]>;
   /** A-8 / D-2 — dbo.fn_CostAnalysis for one student; null when the student has no row. */
   getCostAnalysis(id: StudentKey): Promise<CostAnalysisRow | null>;
+
+  /* ── Phase 7a — Report populations (docs/REPORTS-PLAN.md §2) ── */
+  /** R1. Selection is on the raw class code; resolvableAs carries the A-19 reading for triage. */
+  getUnclassifiedPopulation(): Promise<UnclassifiedRow[]>;
+  /** R2. Current-term FR/FF students with the derived class and the mismatch flag. */
+  getFreshmanAnalysis(): Promise<FreshmanAnalysisRow[]>;
+  /** R3. Every clearance action for students holding more than one, ordered within each student. */
+  getClearedMoreThanOncePopulation(): Promise<ClearedActionRow[]>;
+  /** R4. Every not-cleared enrollee with a debit balance; the service filters the range in memory. */
+  getEnrolleeBalancePopulation(): Promise<EnrolleeBalanceRow[]>;
+  /** R6. One clearance action per student, chosen deterministically by date. */
+  getCurrentlyClearedPopulation(): Promise<CurrentlyClearedRow[]>;
+
+  /* ── Student reclaim (docs/STUDENT-RECLAIM-PLAN.md) ── */
+  /** Why this id is missing from tblStudent. Read-only, sub-second, safe on any lookup miss. */
+  getReclaimDiagnostic(id: StudentKey): Promise<ReclaimDiagnostic>;
+  /**
+   * The ONLY write the application makes to source data, and it goes through a dbo-owned stored
+   * procedure the app holds EXECUTE on — the DENY on SCHEMA::dbo stays in force for everything
+   * else (S-D1). Throws DataSourceUnavailableError when the procedure is not installed, which is
+   * the normal state until a DBA runs db/production/10_usp_reclaim_student.sql.
+   */
+  reclaimStudent(id: StudentKey, actor: string, allowPartial: boolean): Promise<ReclaimResult>;
+  /**
+   * Names, emails and current balances for a set of ids — the live half of every report row (A-30).
+   * Batched by the caller; ids absent from tblStudent are simply missing from the result.
+   */
+  getStudentContacts(ids: string[]): Promise<StudentContactRow[]>;
 }
 
 /** Thrown by a provider when the underlying source cannot be reached or is misconfigured. */

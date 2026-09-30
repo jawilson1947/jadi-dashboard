@@ -4,6 +4,7 @@ import type { AppStore, JobDefinitionRecord, JobKey, MetricFamily } from "../sto
 import { buildBreakdown } from "../metadata/clearance-breakdown";
 import { captureSprint } from "../services/sprint";
 import { buildAcademicYears } from "../services/history";
+import { snapshotReports } from "../reports/definitions";
 
 /**
  * Scheduled refresh jobs (Spec §14.6). Each job reads from the DataProvider and produces
@@ -147,6 +148,27 @@ export const JOB_DEFINITIONS: JobDefinition[] = [
     },
   },
 ];
+
+/**
+ * Phase 7a report jobs (docs/REPORTS-PLAN.md §2). Generated from the report catalog so a new report
+ * brings its own schedule: the definition is the single place a report is declared.
+ *
+ * These payloads are the only ones carrying student identifiers (A-30); the runner prunes the
+ * superseded snapshot after each successful capture.
+ */
+for (const report of snapshotReports()) {
+  JOB_DEFINITIONS.push({
+    key: report.jobKey!,
+    name: `Report: ${report.title}`,
+    family: report.family!,
+    defaultCron: report.defaultCron!,
+    minIntervalMinutes: report.minIntervalMinutes,
+    async run(provider) {
+      const [{ payload, rowCount }, termKey] = await Promise.all([report.capture!(provider), currentTermKey(provider)]);
+      return { payload, rowCount, termKey };
+    },
+  });
+}
 
 export function getJobDefinition(key: JobKey): JobDefinition {
   const def = JOB_DEFINITIONS.find((j) => j.key === key);

@@ -77,6 +77,59 @@ export interface TransactionsView {
   /** Totals over the WHOLE history, not the page — a page total would mislead. */
   allRows: number;
   unmappedCodes: string[];
+  /** Net per academic year (charges less credits) across the WHOLE history, newest first (D-6). */
+  academicYears: AcademicYearCharges[];
+}
+
+/** One academic year (Fall through the following July) — see `academicYearCharges`. */
+export interface AcademicYearCharges {
+  /** e.g. "2018–19". */
+  label: string;
+  /** Sort key: the calendar year the academic year starts in. */
+  startYear: number;
+  /** Sum of the positive amounts posted in that academic year. */
+  charges: number;
+  /** Sum of the credit magnitudes posted in that academic year — positive. */
+  credits: number;
+  /** charges − credits: what that year actually added to the account. */
+  net: number;
+  rows: number;
+}
+
+/**
+ * Net per academic year — charges less credits — newest first (D-6, 2026-09-24, Jim).
+ *
+ * A lifetime gross total is the figure most likely to be misread: a student enrolled for ten
+ * semesters shows six figures of charges, which looks wrong against the ~15k-a-semester everyone
+ * carries in their head. Per academic year, netted against the aid and payments that met it, the
+ * numbers say what a year actually left behind. August starts the academic year, so a Fall billing
+ * sits with the Spring that follows it rather than with the Spring that preceded it.
+ *
+ * Note the aid mismatch this can expose: a credit posted in August for a Spring bill lands in the
+ * academic year of the Fall it was posted in. The line is a reading aid, not an accounting close.
+ */
+export function academicYearCharges(rows: TransactionRow[]): AcademicYearCharges[] {
+  const byYear = new Map<number, AcademicYearCharges>();
+  for (const r of rows) {
+    const year = Number(r.postedOn.slice(0, 4));
+    const month = Number(r.postedOn.slice(5, 7));
+    if (!year || !month) continue;
+    const startYear = month >= 8 ? year : year - 1;
+    const entry = byYear.get(startYear) ?? {
+      label: `${startYear}–${String((startYear + 1) % 100).padStart(2, "0")}`,
+      startYear,
+      charges: 0,
+      credits: 0,
+      net: 0,
+      rows: 0,
+    };
+    if (r.amount > 0) entry.charges = round2(entry.charges + r.amount);
+    else entry.credits = round2(entry.credits + Math.abs(r.amount));
+    entry.net = round2(entry.charges - entry.credits);
+    entry.rows += 1;
+    byYear.set(startYear, entry);
+  }
+  return [...byYear.values()].sort((a, b) => b.startYear - a.startYear);
 }
 
 export interface TransactionsQuery {
@@ -119,6 +172,7 @@ export async function getTransactionsView(
     totalRows: inYear.length,
     allRows: rows.length,
     unmappedCodes: [...new Set(rows.filter((r) => r.unmapped).map((r) => r.sourceCode.trim().toUpperCase()))].sort(),
+    academicYears: academicYearCharges(rows),
   };
 }
 

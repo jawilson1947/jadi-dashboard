@@ -20,6 +20,8 @@ import { TransactionsCard } from "@/components/students/TransactionsCard";
 import { PaymentAnalysisCard } from "@/components/students/PaymentAnalysisCard";
 import { ClearanceCard } from "@/components/students/ClearanceCard";
 import { Unavailable } from "@/components/students/Unavailable";
+import { getAppStore } from "@/server/store";
+import { describeGaps } from "@/server/services/reclaim";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Student Profile" };
@@ -74,6 +76,20 @@ export default async function StudentProfilePage({
     ...(mayAnalyzeClearance ? ([{ key: "clearance", label: "Financial clearance" }] as const) : []),
   ];
 
+  /**
+   * A record reclaimed from Jenzabar is incomplete precisely in the cases the reclaim was needed
+   * (A-32). The warning is read from dash.ReclaimedStudent rather than flashed once after the
+   * write, because the next person to open this profile needs it just as much as the person who
+   * created it. A student nobody reclaimed has no row and no banner.
+   */
+  let reclaimNotice: string | null = null;
+  try {
+    const reclaimed = await getAppStore().getReclaimedStudent(profile.idnumber);
+    if (reclaimed) reclaimNotice = describeGaps(reclaimed);
+  } catch {
+    // The profile must render without it; an unavailable store is not a reason to fail the page.
+  }
+
   return (
     <>
       <PageHeader
@@ -86,6 +102,12 @@ export default async function StudentProfilePage({
           </span>
         }
       />
+
+      {reclaimNotice ? (
+        <div role="status" className="rounded-md border border-warning bg-surface-1 px-4 py-2 text-sm">
+          <span aria-hidden>⚠</span> {reclaimNotice}
+        </div>
+      ) : null}
 
       <StudentHeader profile={profile} photoHref={photoConfigured ? `/api/v1/students/${encodeURIComponent(id)}/photo` : null} />
 
@@ -131,16 +153,28 @@ async function renderTransactions(id: string, scope: "current" | "global", year:
       />
     );
   } catch (err) {
-    if (err instanceof DataSourceUnavailableError) {
-      return (
-        <Unavailable
-          title="Transaction history is not available"
-          detail={err.message}
-          hint="An administrator enables this once the DBA confirms which server holds the archive (ASSUMPTIONS A-24)."
-        />
-      );
+    // One card failing must not take down the profile. The bio, clearance and payment cards are
+    // still useful without transactions, and a student whose history is unreachable is exactly the
+    // student someone is trying to look at. Previously only DataSourceUnavailableError degraded and
+    // anything else was rethrown, so a linked-server transport error 500'd the whole page.
+    const detail =
+      err instanceof DataSourceUnavailableError
+        ? err.message
+        : "The transaction source did not respond. The rest of this profile is unaffected.";
+    if (!(err instanceof DataSourceUnavailableError)) {
+      console.error(JSON.stringify({ level: "error", card: "transactions", studentId: id, scope: effectiveScope, message: err instanceof Error ? err.message : String(err) }));
     }
-    throw err;
+    return (
+      <Unavailable
+        title="Transaction history is not available"
+        detail={detail}
+        hint={
+          effectiveScope === "global"
+            ? "This student is not on the current term, so the card reads the global archive through a linked server (ASSUMPTIONS A-24). Check that the host is reachable, or turn TRANS_HIST_GLOBAL_ENABLED off to hide the card instead."
+            : "An administrator enables this once the DBA confirms which server holds the archive (ASSUMPTIONS A-24)."
+        }
+      />
+    );
   }
 }
 

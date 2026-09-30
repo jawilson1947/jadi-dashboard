@@ -45,7 +45,7 @@ CREATE TABLE dash.Snapshot (
   termKey        varchar(50)      NULL,
   capturedAt     datetime2        NOT NULL,
   sourceProvider varchar(10)      NOT NULL,
-  payload        nvarchar(max)    NOT NULL, -- JSON of typed aggregates; no student rows
+  payload        nvarchar(max)    NOT NULL, -- JSON. Aggregates, except the Phase 7a report families, which carry student IDs + derived codes only (A-30)
   [rowCount]     int              NULL
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Snapshot_family_capturedAt')

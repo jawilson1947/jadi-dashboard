@@ -39,6 +39,20 @@ export function TransactionsCard({
         <span className="ml-auto text-xs text-ink-3">{note}</span>
       </div>
 
+      {view.academicYears.length > 0 ? (
+        <div className="rounded-md border border-border px-3 py-2">
+          <p className="text-xs text-ink-3">Net by academic year, charges less credits (whole history)</p>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {view.academicYears.map((y) => (
+              <span key={y.label} className="whitespace-nowrap" title={`${formatCurrency(y.charges)} charged less ${formatCurrency(y.credits)} credited`}>
+                <span className="text-ink-2">{y.label}</span>{" "}
+                <span className={`tabular font-medium ${y.net < 0 ? "text-good" : ""}`}>{formatCurrency(y.net)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {view.years.length > 1 ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-ink-3 text-xs">Year</span>

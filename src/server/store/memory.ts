@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, SnapshotRecord, SprintWindowRecord } from "./types";
+import type { AppStore, JobDefinitionRecord, JobKey, JobRunRecord, MetricFamily, OperatorProfileRecord, ReclaimedStudentRecord, SnapshotRecord, SprintWindowRecord } from "./types";
 
 interface State {
   jobs: JobDefinitionRecord[];
@@ -8,6 +8,7 @@ interface State {
   snapshots: SnapshotRecord[];
   sprintWindows: SprintWindowRecord[];
   operators: OperatorProfileRecord[];
+  reclaimed: ReclaimedStudentRecord[];
   settings: Record<string, { value: unknown; updatedAt: string; updatedBy: string | null }>;
 }
 
@@ -20,7 +21,7 @@ const MAX_SNAPSHOTS = 5000;
  * Not for production: a single-process store cannot coordinate multiple workers.
  */
 export class MemoryAppStore implements AppStore {
-  private state: State = { jobs: [], runs: [], snapshots: [], sprintWindows: [], operators: [], settings: {} };
+  private state: State = { jobs: [], runs: [], snapshots: [], sprintWindows: [], operators: [], reclaimed: [], settings: {} };
   private lastLoadedMtime = -1;
 
   constructor(private readonly file?: string) {
@@ -142,6 +143,22 @@ export class MemoryAppStore implements AppStore {
     return [...byTerm.values()].sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime()).slice(0, limit) as SnapshotRecord<T>[];
   }
 
+  /**
+   * Keep only the newest `keep` snapshots of a family (A-30): report payloads carry student IDs,
+   * so a refresh replaces the previous population rather than accumulating copies of it.
+   */
+  async pruneSnapshots(family: MetricFamily, keep: number) {
+    this.load();
+    const mine = this.state.snapshots
+      .filter((s) => s.metricFamily === family)
+      .sort((a, b) => b.capturedAt.getTime() - a.capturedAt.getTime());
+    const doomed = new Set(mine.slice(Math.max(0, keep)).map((s) => s.id));
+    if (doomed.size === 0) return 0;
+    this.state.snapshots = this.state.snapshots.filter((s) => !doomed.has(s.id));
+    this.persist();
+    return doomed.size;
+  }
+
   async listSprintWindows() {
     this.load();
     return [...this.state.sprintWindows].sort((a, b) => b.start.localeCompare(a.start));
@@ -181,6 +198,27 @@ export class MemoryAppStore implements AppStore {
     return true;
   }
 
+  /* ── Reclaimed students (A-32) ── */
+
+  async getReclaimedStudent(idnumber: string) {
+    this.load();
+    return this.state.reclaimed.find((r) => r.idnumber === idnumber) ?? null;
+  }
+
+  async listReclaimedStudents(onlyUnresolved = true, limit = 200) {
+    this.load();
+    return this.state.reclaimed
+      .filter((r) => (onlyUnresolved ? r.resolvedAt === null : true))
+      .sort((a, b) => b.reclaimedAt.getTime() - a.reclaimedAt.getTime())
+      .slice(0, limit);
+  }
+
+  async recordReclaimedStudent(record: ReclaimedStudentRecord) {
+    this.load();
+    this.state.reclaimed = [record, ...this.state.reclaimed.filter((r) => r.idnumber !== record.idnumber)];
+    this.persist();
+  }
+
   async getSetting<T>(key: string) {
     this.load();
     return (this.state.settings[key]?.value as T | undefined) ?? null;
@@ -201,6 +239,7 @@ function revive(raw: State): State {
     snapshots: (raw.snapshots ?? []).map((s) => ({ ...s, capturedAt: d(s.capturedAt)! })),
     sprintWindows: (raw.sprintWindows ?? []).map((w) => ({ ...w, updatedAt: d(w.updatedAt)! })),
     operators: (raw.operators ?? []).map((o) => ({ ...o, updatedAt: d(o.updatedAt)! })),
+    reclaimed: (raw.reclaimed ?? []).map((r) => ({ ...r, reclaimedAt: d(r.reclaimedAt)!, resolvedAt: d(r.resolvedAt) })),
     settings: raw.settings ?? {},
   };
 }
